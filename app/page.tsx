@@ -1040,21 +1040,35 @@ export default function Page() {
           s.cheat.activeCheat = null;
           // Execute both hint moves
           if (s.cheat.hintMoves) {
-            const [m1, m2] = s.cheat.hintMoves;
-            // Move 1
-            const src1 = s.columns[m1.fromCol];
-            const moved1 = src1.splice(m1.fromCardIndex);
-            s.columns[m1.toCol].push(...moved1);
-            revealBottom(s.columns[m1.fromCol]);
-            s.moves++;
-            // Move 2
-            const ss2 = seqStart(s.columns[m2.fromCol]);
-            const src2 = s.columns[m2.fromCol];
-            const moved2 = src2.splice(ss2);
-            s.columns[m2.toCol].push(...moved2);
-            revealBottom(s.columns[m2.fromCol]);
-            s.moves++;
-            s.lastMove = { type: 'col', index: m2.toCol };
+            for (const mv of s.cheat.hintMoves) {
+              const col = s.columns[mv.fromCol];
+              if (mv.toCol === -1) {
+                // Move to excuse slot
+                const card = col.pop()!;
+                revealBottom(col);
+                card.faceUp = true;
+                s.excuseSlot = card;
+                s.moves++;
+                s.lastMove = { type: 'excuse' };
+              } else if (mv.toCol < -1) {
+                // Move to foundation
+                const fi = -2 - mv.toCol;
+                const card = col.pop()!;
+                revealBottom(col);
+                s.foundations[fi].push(card);
+                s.moves++;
+                s.lastMove = { type: 'fdn', index: fi };
+                if (isWin(s)) s.gameOver = true;
+              } else {
+                // Column-to-column move
+                const ss = seqStart(col);
+                const moved = col.splice(ss);
+                s.columns[mv.toCol].push(...moved);
+                revealBottom(col);
+                s.moves++;
+                s.lastMove = { type: 'col', index: mv.toCol };
+              }
+            }
           }
           s.cheat.hintMoves = null;
           return s;
@@ -1605,45 +1619,53 @@ export default function Page() {
         {!gs.gameOver && !gs.cheat.slowDistMode && !gs.cheat.activeCheat && (
           <div style={{
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            gap: '6px', marginTop: '2px', paddingBottom: '2px',
+            gap: '8px', marginTop: '4px', paddingBottom: '4px',
           }}>
             <button
               onClick={(e) => { e.stopPropagation(); activateHintCheat(); }}
               disabled={gs.cheat.hintUsed}
               style={{
-                fontSize: 'clamp(7px, 1.4vw, 11px)', padding: '3px 8px',
+                fontSize: 'clamp(8px, 1.6vw, 12px)', padding: '5px 12px',
                 background: gs.cheat.hintUsed
                   ? 'rgba(255,255,255,0.03)'
-                  : 'linear-gradient(135deg, #7c3aed, #6d28d9)',
-                color: gs.cheat.hintUsed ? 'rgba(255,255,255,0.2)' : '#e9d5ff',
+                  : 'linear-gradient(135deg, #9333ea 0%, #7c3aed 40%, #6d28d9 100%)',
+                color: gs.cheat.hintUsed ? 'rgba(255,255,255,0.15)' : '#f3e8ff',
                 border: gs.cheat.hintUsed
                   ? '1px solid rgba(255,255,255,0.05)'
-                  : '1px solid #8b5cf6',
-                borderRadius: '6px',
+                  : '1px solid rgba(168,85,247,0.6)',
+                borderRadius: '999px',
                 cursor: gs.cheat.hintUsed ? 'default' : 'pointer',
                 fontFamily: "'SF Pro Display', -apple-system, sans-serif",
-                fontWeight: 600, opacity: gs.cheat.hintUsed ? 0.5 : 1,
+                fontWeight: 700, opacity: gs.cheat.hintUsed ? 0.4 : 1,
+                letterSpacing: '0.03em',
+                boxShadow: gs.cheat.hintUsed ? 'none' : '0 2px 8px rgba(147,51,234,0.4), inset 0 1px 0 rgba(255,255,255,0.15)',
+                textShadow: gs.cheat.hintUsed ? 'none' : '0 1px 2px rgba(0,0,0,0.3)',
+                transition: 'transform 0.15s, box-shadow 0.15s',
               }}
-            >{gs.cheat.hintUsed ? 'Triche 1 ✗' : 'Triche : Indice'}</button>
+            >{gs.cheat.hintUsed ? 'Mysterio' : 'Mysterio'}</button>
             <button
               onClick={(e) => { e.stopPropagation(); activateSlowDistCheat(); }}
               disabled={gs.cheat.slowDistUsed || gs.stock.length === 0}
               style={{
-                fontSize: 'clamp(7px, 1.4vw, 11px)', padding: '3px 8px',
-                background: gs.cheat.slowDistUsed || gs.stock.length === 0
+                fontSize: 'clamp(8px, 1.6vw, 12px)', padding: '5px 12px',
+                background: (gs.cheat.slowDistUsed || gs.stock.length === 0)
                   ? 'rgba(255,255,255,0.03)'
-                  : 'linear-gradient(135deg, #2563eb, #1d4ed8)',
-                color: gs.cheat.slowDistUsed || gs.stock.length === 0 ? 'rgba(255,255,255,0.2)' : '#bfdbfe',
-                border: gs.cheat.slowDistUsed || gs.stock.length === 0
+                  : 'linear-gradient(135deg, #059669 0%, #047857 40%, #065f46 100%)',
+                color: (gs.cheat.slowDistUsed || gs.stock.length === 0) ? 'rgba(255,255,255,0.15)' : '#d1fae5',
+                border: (gs.cheat.slowDistUsed || gs.stock.length === 0)
                   ? '1px solid rgba(255,255,255,0.05)'
-                  : '1px solid #3b82f6',
-                borderRadius: '6px',
-                cursor: gs.cheat.slowDistUsed || gs.stock.length === 0 ? 'default' : 'pointer',
+                  : '1px solid rgba(16,185,129,0.6)',
+                borderRadius: '999px',
+                cursor: (gs.cheat.slowDistUsed || gs.stock.length === 0) ? 'default' : 'pointer',
                 fontFamily: "'SF Pro Display', -apple-system, sans-serif",
-                fontWeight: 600,
-                opacity: gs.cheat.slowDistUsed || gs.stock.length === 0 ? 0.5 : 1,
+                fontWeight: 700,
+                opacity: (gs.cheat.slowDistUsed || gs.stock.length === 0) ? 0.4 : 1,
+                letterSpacing: '0.03em',
+                boxShadow: (gs.cheat.slowDistUsed || gs.stock.length === 0) ? 'none' : '0 2px 8px rgba(5,150,105,0.4), inset 0 1px 0 rgba(255,255,255,0.15)',
+                textShadow: (gs.cheat.slowDistUsed || gs.stock.length === 0) ? 'none' : '0 1px 2px rgba(0,0,0,0.3)',
+                transition: 'transform 0.15s, box-shadow 0.15s',
               }}
-            >{gs.cheat.slowDistUsed ? 'Triche 2 ✗' : 'Triche : Distrib.'}</button>
+            >{(gs.cheat.slowDistUsed || gs.stock.length === 0) ? 'Triche de l\'Aude' : 'Triche de l\'Aude'}</button>
           </div>
         )}
 
@@ -1656,14 +1678,14 @@ export default function Page() {
               animation: 'cheat-overlay-in 1.8s ease-out forwards',
               background: gs.cheat.activeCheat === 'hint'
                 ? 'radial-gradient(ellipse at center, rgba(124,58,237,0.4) 0%, rgba(0,0,0,0.8) 70%)'
-                : 'radial-gradient(ellipse at center, rgba(37,99,235,0.4) 0%, rgba(0,0,0,0.8) 70%)',
+                : 'radial-gradient(ellipse at center, rgba(5,150,105,0.4) 0%, rgba(0,0,0,0.8) 70%)',
             }}
           >
             {/* Flash */}
             <div className="absolute inset-0" style={{
               background: gs.cheat.activeCheat === 'hint'
                 ? 'rgba(168, 85, 247, 1)'
-                : 'rgba(59, 130, 246, 1)',
+                : 'rgba(16, 185, 129, 1)',
               animation: 'cheat-flash 1.8s ease-out forwards',
             }} />
             {/* Skull / Icon */}
@@ -1673,7 +1695,7 @@ export default function Page() {
               animation: 'cheat-skull 1.8s ease-out forwards',
               filter: 'drop-shadow(0 0 30px rgba(255,255,255,0.3))',
             }}>
-              {gs.cheat.activeCheat === 'hint' ? '🔮' : '🃏'}
+              {gs.cheat.activeCheat === 'hint' ? '🔮' : '🍇'}
             </div>
             {/* Text */}
             <div style={{
@@ -1686,10 +1708,10 @@ export default function Page() {
               color: '#fff',
               textShadow: gs.cheat.activeCheat === 'hint'
                 ? '0 0 20px rgba(168,85,247,0.8), 0 0 40px rgba(168,85,247,0.4)'
-                : '0 0 20px rgba(59,130,246,0.8), 0 0 40px rgba(59,130,246,0.4)',
+                : '0 0 20px rgba(16,185,129,0.8), 0 0 40px rgba(16,185,129,0.4)',
               whiteSpace: 'nowrap',
             }}>
-              {gs.cheat.activeCheat === 'hint' ? 'TRICHE !' : 'TRICHE !'}
+              {gs.cheat.activeCheat === 'hint' ? 'MYSTERIO !' : 'TRICHE DE L\'AUDE !'}
             </div>
           </div>
         )}
