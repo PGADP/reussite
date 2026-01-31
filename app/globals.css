@@ -3,25 +3,52 @@
 @tailwind utilities;
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --card-w: 30px;
+  --card-h: 44px;
+  --peek-down: 8px;
+  --peek-up: 18px;
+  --card-r: 3px;
+  --card-fs: 9px;
+  --card-fs-lg: 14px;
 }
 
-@media (prefers-color-scheme: dark) {
+@media (min-width: 480px) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --card-w: 46px;
+    --card-h: 66px;
+    --peek-down: 10px;
+    --peek-up: 22px;
+    --card-r: 4px;
+    --card-fs: 11px;
+    --card-fs-lg: 18px;
+  }
+}
+
+@media (min-width: 700px) {
+  :root {
+    --card-w: 58px;
+    --card-h: 82px;
+    --peek-down: 13px;
+    --peek-up: 26px;
+    --card-r: 5px;
+    --card-fs: 13px;
+    --card-fs-lg: 22px;
+  }
+}
+
+@media (min-width: 960px) {
+  :root {
+    --card-w: 68px;
+    --card-h: 96px;
+    --peek-down: 15px;
+    --peek-up: 30px;
+    --card-r: 6px;
+    --card-fs: 15px;
+    --card-fs-lg: 26px;
   }
 }
 
 body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
-}
-
-@layer utilities {
-  .text-balance {
-    text-wrap: balance;
-  }
+  margin: 0;
+  overflow-x: hidden;
 }
