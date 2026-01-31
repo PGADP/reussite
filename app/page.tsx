@@ -219,6 +219,32 @@ function isWin(gs: GameState): boolean {
   return suitsDone && trumpsDone && excuseDone;
 }
 
+// Find the start index of the movable sequence at the bottom of a column.
+// A sequence is a contiguous run of face-up cards where each card could be
+// legally placed on the one below it (alternating color for suits, consecutive
+// for trumps). Only the entire sequence can be moved — no cutting allowed.
+function seqStart(col: Card[]): number {
+  if (col.length === 0) return 0;
+  let i = col.length - 1;
+  while (i > 0) {
+    const cur = col[i];
+    const prev = col[i - 1];
+    if (!cur.faceUp || !prev.faceUp) break;
+    // Excuse breaks sequence
+    if (cur.kind === 'excuse' || prev.kind === 'excuse') break;
+    // Check if cur is a valid continuation of prev
+    if (cur.kind === 'trump' && prev.kind === 'trump') {
+      if (cur.value !== prev.value - 1) break;
+    } else if (cur.kind === 'suit' && prev.kind === 'suit') {
+      if (cur.value !== prev.value - 1 || isRed(cur) === isRed(prev)) break;
+    } else {
+      break; // Mixed trump/suit breaks the sequence
+    }
+    i--;
+  }
+  return i;
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // State helpers
 // ═══════════════════════════════════════════════════════════════════
@@ -643,16 +669,21 @@ export default function Page() {
       if (!prev || prev.gameOver) return prev;
       const s = cloneGs(prev);
       const col = s.columns[ci];
+      const ss = seqStart(col); // first index of the movable sequence
+
       if (s.selected !== null) {
-        if (s.selected.from === 'col' && s.selected.index === ci && s.selected.cardIndex === cardIdx) {
+        // Clicking the already-selected sequence toggles it off
+        if (s.selected.from === 'col' && s.selected.index === ci && s.selected.cardIndex === ss) {
           s.selected = null; s.lastMove = null; return s;
         }
+        // Clicking on the same column: re-select this column's sequence (or deselect if not in seq)
         if (s.selected.from === 'col' && s.selected.index === ci) {
-          if (col[cardIdx]?.faceUp) {
-            s.selected = { from: 'col', index: ci, cardIndex: cardIdx }; s.lastMove = null; return s;
+          if (col[cardIdx]?.faceUp && cardIdx >= ss) {
+            s.selected = { from: 'col', index: ci, cardIndex: ss }; s.lastMove = null; return s;
           }
           s.selected = null; s.lastMove = null; return s;
         }
+        // Clicking on a different column: try to place
         const card = getSelectedCard(s);
         if (card && canPlaceOnColumn(card, col)) {
           const moved = removeSelectedCards(s);
@@ -661,13 +692,15 @@ export default function Page() {
           s.lastMove = { type: 'col', index: ci };
           return s;
         }
-        if (col[cardIdx]?.faceUp) {
-          s.selected = { from: 'col', index: ci, cardIndex: cardIdx }; s.lastMove = null; return s;
+        // Placement failed: select this column's sequence instead (if clicked card is in seq)
+        if (col[cardIdx]?.faceUp && cardIdx >= ss) {
+          s.selected = { from: 'col', index: ci, cardIndex: ss }; s.lastMove = null; return s;
         }
         s.selected = null; s.lastMove = null; return s;
       }
-      if (!col[cardIdx]?.faceUp) return prev;
-      s.selected = { from: 'col', index: ci, cardIndex: cardIdx }; s.lastMove = null;
+      // No current selection: select the sequence (only if clicked card is in the seq)
+      if (!col[cardIdx]?.faceUp || cardIdx < ss) return prev;
+      s.selected = { from: 'col', index: ci, cardIndex: ss }; s.lastMove = null;
       return s;
     });
   }, []);
@@ -1026,8 +1059,11 @@ export default function Page() {
               {col.length === 0 ? (
                 <EmptySlot label="" onClick={() => {}} />
               ) : (
-                col.map((card, idx) => {
+                (() => {
+                const ss = seqStart(col);
+                return col.map((card, idx) => {
                   const isLast = idx === col.length - 1;
+                  const inSeq = idx >= ss;
                   const isInSelection = gs.selected?.from === 'col'
                     && gs.selected.index === ci
                     && idx >= gs.selected.cardIndex;
@@ -1054,21 +1090,22 @@ export default function Page() {
                           onDoubleClick={(e) => { e.stopPropagation(); if (isLast) autoPlace(ci); }}
                           onTouchStart={handleTouchStart}
                           onTouchEnd={(e) => handleTouchEnd(ci, idx, isLast, e)}
-                          onPointerDown={(e) => {
+                          onPointerDown={inSeq ? (e) => {
                             e.stopPropagation();
-                            const cards = col.slice(idx);
+                            const cards = col.slice(ss);
                             handleDragStart(
-                              { from: 'col', index: ci, cardIndex: idx },
+                              { from: 'col', index: ci, cardIndex: ss },
                               cards, e
                             );
-                          }}
+                          } : undefined}
                         />
                       ) : (
                         <CardBack />
                       )}
                     </div>
                   );
-                })
+                });
+              })()
               )}
             </div>
           ))}
