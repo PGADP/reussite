@@ -1773,37 +1773,212 @@ export default function Page() {
           </div>
         )}
 
-        {/* ─── Victory ─────────────────────────────────── */}
-        {gs.gameOver && (
-          <div className="fixed inset-0 flex items-center justify-center z-50"
-            style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)' }}>
+        {/* ─── Victory Celebration ─────────────────────────────────── */}
+        {gs.gameOver && (() => {
+          const hearts = Array.from({ length: 30 }, (_, i) => ({
+            id: i,
+            left: `${Math.random() * 100}%`,
+            delay: `${Math.random() * 4}s`,
+            duration: `${3 + Math.random() * 4}s`,
+            size: `${18 + Math.random() * 28}px`,
+            floatY: `${-200 - Math.random() * 400}px`,
+            rot: `${-30 + Math.random() * 60}deg`,
+            rotEnd: `${-40 + Math.random() * 80}deg`,
+            emoji: ['❤️', '💖', '💕', '💗', '💝', '💘', '🩷', '✨', '🌟', '⭐'][i % 10],
+          }));
+          const confetti = Array.from({ length: 40 }, (_, i) => ({
+            id: i,
+            left: `${Math.random() * 100}%`,
+            delay: `${Math.random() * 3}s`,
+            duration: `${2 + Math.random() * 3}s`,
+            color: ['#ff6b9d', '#c44dff', '#ff4d4d', '#ffd700', '#ff69b4', '#ff1493', '#f59e0b', '#4dffb8'][i % 8],
+            size: `${6 + Math.random() * 8}px`,
+            fallY: `${300 + Math.random() * 400}px`,
+            rot: `${360 + Math.random() * 720}deg`,
+          }));
+          const fireworks = Array.from({ length: 6 }, (_, i) => ({
+            id: i,
+            left: `${15 + Math.random() * 70}%`,
+            top: `${10 + Math.random() * 40}%`,
+            delay: `${i * 0.8 + Math.random() * 0.5}s`,
+            color: ['#ff6b9d', '#ffd700', '#c44dff', '#ff4d4d', '#4dffb8', '#ff69b4'][i],
+          }));
+          return (
+          <div className="fixed inset-0 z-50" style={{
+            animation: 'victory-overlay-in 0.8s ease-out forwards',
+          }}>
+            {/* Dark overlay */}
             <div style={{
-              background: 'linear-gradient(135deg, #1e293b, #0f172a)',
-              border: '1px solid rgba(255,255,255,0.1)',
-              borderRadius: '16px', padding: '28px', textAlign: 'center',
-              boxShadow: '0 24px 48px rgba(0,0,0,0.5)',
-              fontFamily: "'SF Pro Display', -apple-system, sans-serif",
-              animation: 'card-land 0.5s ease-out',
-              maxWidth: '320px', margin: '0 16px',
+              position: 'absolute', inset: 0,
+              background: 'radial-gradient(ellipse at 50% 50%, rgba(60,0,40,0.85) 0%, rgba(0,0,0,0.92) 100%)',
+              backdropFilter: 'blur(12px)',
+            }} />
+
+            {/* Confetti rain */}
+            {confetti.map(c => (
+              <div key={`conf-${c.id}`} style={{
+                position: 'absolute', top: -10, left: c.left,
+                width: c.size, height: c.size,
+                borderRadius: c.id % 3 === 0 ? '50%' : c.id % 3 === 1 ? '2px' : '0',
+                background: c.color,
+                animation: `victory-confetti-fall ${c.duration} ${c.delay} ease-in infinite`,
+                ['--fall-y' as string]: c.fallY,
+                ['--conf-rot' as string]: c.rot,
+                zIndex: 51,
+              }} />
+            ))}
+
+            {/* Firework bursts */}
+            {fireworks.map(fw => (
+              <div key={`fw-${fw.id}`} style={{
+                position: 'absolute', left: fw.left, top: fw.top, zIndex: 52,
+              }}>
+                {Array.from({ length: 12 }, (_, j) => {
+                  const angle = (j * 30) * Math.PI / 180;
+                  const dist = 40 + Math.random() * 60;
+                  return (
+                    <div key={j} style={{
+                      position: 'absolute',
+                      width: '6px', height: '6px', borderRadius: '50%',
+                      background: fw.color,
+                      boxShadow: `0 0 8px ${fw.color}, 0 0 16px ${fw.color}`,
+                      animation: `victory-spark 1.2s ${fw.delay} ease-out infinite`,
+                      ['--sx' as string]: `${Math.cos(angle) * dist}px`,
+                      ['--sy' as string]: `${Math.sin(angle) * dist}px`,
+                    }} />
+                  );
+                })}
+              </div>
+            ))}
+
+            {/* Floating hearts */}
+            {hearts.map(h => (
+              <div key={`heart-${h.id}`} style={{
+                position: 'absolute', bottom: '-20px', left: h.left,
+                fontSize: h.size, zIndex: 53,
+                animation: `victory-heart-float ${h.duration} ${h.delay} ease-out infinite`,
+                ['--float-y' as string]: h.floatY,
+                ['--rot' as string]: h.rot,
+                ['--rot-end' as string]: h.rotEnd,
+                pointerEvents: 'none',
+              }}>{h.emoji}</div>
+            ))}
+
+            {/* Central content */}
+            <div style={{
+              position: 'absolute', inset: 0,
+              display: 'flex', flexDirection: 'column',
+              alignItems: 'center', justifyContent: 'center',
+              zIndex: 54, padding: '20px',
             }}>
-              <div style={{ fontSize: '44px', marginBottom: '10px' }}>🎉</div>
-              <h2 style={{
-                fontSize: '26px', fontWeight: 800, marginBottom: '6px',
-                color: '#f8fafc', letterSpacing: '-0.02em',
-              }}>Victoire !</h2>
-              <p style={{
-                color: 'rgba(255,255,255,0.4)', marginBottom: '20px', fontSize: '13px',
-              }}>Terminé en {gs.moves} coups</p>
-              <button onClick={restart} style={{
-                background: 'linear-gradient(135deg, #f59e0b, #d97706)',
-                color: '#1e293b', padding: '10px 24px', borderRadius: '10px',
-                fontSize: '15px', fontWeight: 700, border: 'none', cursor: 'pointer',
+              {/* Big trophy/celebration */}
+              <div style={{
+                fontSize: 'clamp(60px, 15vw, 100px)',
+                animation: 'victory-title-in 1s ease-out forwards, victory-bounce 2s 1.5s ease-in-out infinite',
+                opacity: 0,
+              }}>🏆</div>
+
+              {/* VICTOIRE title with shimmer */}
+              <h1 style={{
+                fontSize: 'clamp(36px, 10vw, 64px)',
+                fontWeight: 900,
+                background: 'linear-gradient(90deg, #ffd700, #ff6b9d, #c44dff, #ffd700, #ff6b9d)',
+                backgroundSize: '200% auto',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                animation: 'victory-title-in 1s 0.3s ease-out forwards, victory-shimmer 3s 1.3s linear infinite',
+                opacity: 0,
+                letterSpacing: '-0.02em',
+                margin: '0 0 8px 0',
                 fontFamily: "'SF Pro Display', -apple-system, sans-serif",
-                boxShadow: '0 4px 12px rgba(245,158,11,0.3)',
-              }}>Rejouer</button>
+                textAlign: 'center',
+              }}>VICTOIRE !</h1>
+
+              {/* Decorative hearts line */}
+              <div style={{
+                fontSize: 'clamp(20px, 5vw, 32px)',
+                animation: 'victory-message-in 0.8s 1s ease-out forwards',
+                opacity: 0,
+                marginBottom: '12px',
+              }}>💖✨💖✨💖</div>
+
+              {/* Main message */}
+              <div style={{
+                animation: 'victory-message-in 0.8s 1.8s ease-out forwards, victory-pulse-glow 2s 2.6s ease-in-out infinite',
+                opacity: 0,
+                textAlign: 'center',
+                maxWidth: '400px',
+              }}>
+                <p style={{
+                  fontSize: 'clamp(22px, 6vw, 36px)',
+                  fontWeight: 800,
+                  color: '#fff',
+                  margin: '0 0 4px 0',
+                  fontFamily: "'SF Pro Display', -apple-system, sans-serif",
+                  lineHeight: 1.3,
+                }}>Bravo Laurette !</p>
+              </div>
+
+              {/* Love message */}
+              <div style={{
+                animation: 'victory-message-in 0.8s 2.8s ease-out forwards',
+                opacity: 0,
+                textAlign: 'center',
+                maxWidth: '380px',
+              }}>
+                <p style={{
+                  fontSize: 'clamp(15px, 4vw, 22px)',
+                  fontWeight: 600,
+                  color: '#ff9ec6',
+                  margin: '8px 0',
+                  fontFamily: "'SF Pro Display', -apple-system, sans-serif",
+                  lineHeight: 1.5,
+                }}>
+                  Je t&apos;aime 💕<br />
+                  J&apos;ai toujours cru en toi 💗
+                </p>
+              </div>
+
+              {/* Heart rain row */}
+              <div style={{
+                animation: 'victory-message-in 0.8s 3.6s ease-out forwards, victory-rainbow 4s 4.4s linear infinite',
+                opacity: 0,
+                fontSize: 'clamp(24px, 6vw, 40px)',
+                margin: '8px 0',
+              }}>
+                💝💘❤️🩷💖💗💕
+              </div>
+
+              {/* Move counter */}
+              <p style={{
+                animation: 'victory-message-in 0.8s 4.2s ease-out forwards',
+                opacity: 0,
+                color: 'rgba(255,255,255,0.4)',
+                fontSize: '13px',
+                margin: '12px 0 16px 0',
+                fontFamily: "'SF Pro Display', -apple-system, sans-serif",
+              }}>Terminé en {gs.moves} coups</p>
+
+              {/* Replay button — appears last */}
+              <button onClick={restart} style={{
+                animation: 'victory-btn-in 0.6s 4.8s ease-out forwards',
+                opacity: 0,
+                background: 'linear-gradient(135deg, #ff6b9d, #c44dff)',
+                color: '#fff',
+                padding: '12px 32px',
+                borderRadius: '50px',
+                fontSize: '17px',
+                fontWeight: 700,
+                border: 'none',
+                cursor: 'pointer',
+                fontFamily: "'SF Pro Display', -apple-system, sans-serif",
+                boxShadow: '0 4px 20px rgba(255, 107, 157, 0.4)',
+                letterSpacing: '0.02em',
+              }}>Rejouer 🃏</button>
             </div>
           </div>
-        )}
+          );
+        })()}
       </div>
     </div>
   );
