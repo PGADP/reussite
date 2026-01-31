@@ -105,16 +105,30 @@ const cardBorderColor = (c: Card, selected: boolean): string => {
   return isRed(c) ? '#fecaca' : '#cbd5e1';
 };
 
-// Is a King (value 14) face-up on top of column?
-function hasKingOnTop(col: Card[]): boolean {
-  if (col.length === 0) return false;
-  const top = col[col.length - 1];
-  return top.faceUp && top.kind === 'suit' && top.value === 14;
+// Does the column contain a face-up King (value 14)?
+function hasVisibleKing(col: Card[]): boolean {
+  return col.some(c => c.faceUp && c.kind === 'suit' && c.value === 14);
 }
 
 // ═══════════════════════════════════════════════════════════════════
 // Game state
 // ═══════════════════════════════════════════════════════════════════
+
+interface HintMove {
+  fromCol: number;
+  fromCardIndex: number;
+  toCol: number;
+}
+
+interface CheatState {
+  hintUsed: boolean;
+  slowDistUsed: boolean;
+  activeCheat: 'hint' | 'slowDist' | null;
+  slowDistMode: boolean;
+  slowDistEligible: number[];
+  hintMoves: [HintMove, HintMove] | null;
+  hintStep: number;
+}
 
 interface GameState {
   columns: Card[][];
@@ -126,6 +140,7 @@ interface GameState {
   moves: number;
   lastMove: LastMove | null;
   trumpsMerged: boolean;
+  cheat: CheatState;
 }
 
 function newGameState(): GameState {
@@ -150,6 +165,15 @@ function newGameState(): GameState {
     moves: 0,
     lastMove: null,
     trumpsMerged: false,
+    cheat: {
+      hintUsed: false,
+      slowDistUsed: false,
+      activeCheat: null,
+      slowDistMode: false,
+      slowDistEligible: [],
+      hintMoves: null,
+      hintStep: 0,
+    },
   };
 }
 
@@ -246,12 +270,144 @@ function seqStart(col: Card[]): number {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// Cheat: 2-move hint solver
+// ═══════════════════════════════════════════════════════════════════
+
+// Simulate a column move (seq from fromCol starting at cardIdx → toCol)
+// Returns a new columns array (shallow-cloned) or null if invalid
+function simulateColMove(columns: Card[][], fromCol: number, cardIdx: number, toCol: number): Card[][] | null {
+  const src = columns[fromCol];
+  const dst = columns[toCol];
+  if (fromCol === toCol) return null;
+  if (cardIdx < 0 || cardIdx >= src.length) return null;
+  const card = src[cardIdx];
+  if (!card.faceUp) return null;
+  if (!canPlaceOnColumn(card, dst)) return null;
+  // Clone columns
+  const newCols = columns.map(c => [...c]);
+  const moved = newCols[fromCol].splice(cardIdx);
+  newCols[toCol].push(...moved);
+  // Reveal bottom card
+  if (newCols[fromCol].length > 0 && !newCols[fromCol][newCols[fromCol].length - 1].faceUp) {
+    newCols[fromCol][newCols[fromCol].length - 1] = { ...newCols[fromCol][newCols[fromCol].length - 1], faceUp: true };
+  }
+  return newCols;
+}
+
+// Check if a state has any foundation-placeable card (= "unblocked")
+function hasFoundationMove(columns: Card[][], foundations: Card[][], merged: boolean, excuseSlot: Card | null): boolean {
+  for (let ci = 0; ci < columns.length; ci++) {
+    const col = columns[ci];
+    if (col.length === 0) continue;
+    const top = col[col.length - 1];
+    if (top.kind === 'excuse' && excuseSlot === null) return true;
+    if (findFoundation(top, foundations, merged) !== -1) return true;
+  }
+  return false;
+}
+
+// Check if a move reveals a face-down card (= "productive")
+function revealsCard(columns: Card[][], fromCol: number, cardIdx: number): boolean {
+  if (cardIdx === 0) return false;
+  return !columns[fromCol][cardIdx - 1].faceUp;
+}
+
+// Find a 2-move sequence that unblocks (leads to a foundation placement or reveals cards)
+function findTwoMoveHint(gs: GameState): [HintMove, HintMove] | null {
+  const cols = gs.columns;
+
+  // Gather all possible first moves
+  type Move = { fromCol: number; cardIdx: number; toCol: number };
+  const allMoves: Move[] = [];
+  for (let fc = 0; fc < 11; fc++) {
+    if (cols[fc].length === 0) continue;
+    const ss = seqStart(cols[fc]);
+    for (let tc = 0; tc < 11; tc++) {
+      if (fc === tc) continue;
+      if (canPlaceOnColumn(cols[fc][ss], cols[tc])) {
+        allMoves.push({ fromCol: fc, cardIdx: ss, toCol: tc });
+      }
+    }
+  }
+
+  // Try each pair of moves — prefer pairs that lead to a foundation move
+  let bestPair: [HintMove, HintMove] | null = null;
+
+  for (const m1 of allMoves) {
+    const cols1 = simulateColMove(cols, m1.fromCol, m1.cardIdx, m1.toCol);
+    if (!cols1) continue;
+
+    // Check if after first move we already have a foundation move
+    if (hasFoundationMove(cols1, gs.foundations, gs.trumpsMerged, gs.excuseSlot)) {
+      // Find a second move that is also useful, or just return with a dummy second
+      for (const m2 of allMoves) {
+        if (m2.fromCol === m1.fromCol && m2.toCol === m1.toCol) continue;
+        // Recalc seq start for the new state
+        const src2 = cols1[m2.fromCol];
+        if (src2.length === 0) continue;
+        const ss2 = seqStart(src2);
+        if (canPlaceOnColumn(src2[ss2], cols1[m2.toCol])) {
+          const cols2 = simulateColMove(cols1, m2.fromCol, ss2, m2.toCol);
+          if (cols2 && hasFoundationMove(cols2, gs.foundations, gs.trumpsMerged, gs.excuseSlot)) {
+            return [
+              { fromCol: m1.fromCol, fromCardIndex: m1.cardIdx, toCol: m1.toCol },
+              { fromCol: m2.fromCol, fromCardIndex: ss2, toCol: m2.toCol },
+            ];
+          }
+        }
+      }
+      // Even with no good second, first move alone unblocks
+      // Find any valid second move
+      for (let fc = 0; fc < 11; fc++) {
+        if (cols1[fc].length === 0) continue;
+        const ss2 = seqStart(cols1[fc]);
+        for (let tc = 0; tc < 11; tc++) {
+          if (fc === tc) continue;
+          if (canPlaceOnColumn(cols1[fc][ss2], cols1[tc])) {
+            return [
+              { fromCol: m1.fromCol, fromCardIndex: m1.cardIdx, toCol: m1.toCol },
+              { fromCol: fc, fromCardIndex: ss2, toCol: tc },
+            ];
+          }
+        }
+      }
+    }
+
+    // Try second moves that reveal cards or lead to foundation
+    for (let fc2 = 0; fc2 < 11; fc2++) {
+      if (cols1[fc2].length === 0) continue;
+      const ss2 = seqStart(cols1[fc2]);
+      for (let tc2 = 0; tc2 < 11; tc2++) {
+        if (fc2 === tc2) continue;
+        const cols2 = simulateColMove(cols1, fc2, ss2, tc2);
+        if (!cols2) continue;
+        if (hasFoundationMove(cols2, gs.foundations, gs.trumpsMerged, gs.excuseSlot)) {
+          return [
+            { fromCol: m1.fromCol, fromCardIndex: m1.cardIdx, toCol: m1.toCol },
+            { fromCol: fc2, fromCardIndex: ss2, toCol: tc2 },
+          ];
+        }
+        if (!bestPair && (revealsCard(cols1, fc2, ss2) || revealsCard(cols, m1.fromCol, m1.cardIdx))) {
+          bestPair = [
+            { fromCol: m1.fromCol, fromCardIndex: m1.cardIdx, toCol: m1.toCol },
+            { fromCol: fc2, fromCardIndex: ss2, toCol: tc2 },
+          ];
+        }
+      }
+    }
+  }
+
+  return bestPair;
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // State helpers
 // ═══════════════════════════════════════════════════════════════════
 
 function cloneGs(gs: GameState): GameState {
   return {
     ...gs,
+    cheat: { ...gs.cheat, slowDistEligible: [...gs.cheat.slowDistEligible], hintMoves: gs.cheat.hintMoves ? [...gs.cheat.hintMoves] as [HintMove, HintMove] : null },
     columns: gs.columns.map(c => c.map(card => ({ ...card }))),
     foundations: gs.foundations.map(f => f.map(card => ({ ...card }))),
     stock: gs.stock.map(c => ({ ...c })),
@@ -639,15 +795,15 @@ export default function Page() {
 
   const restart = useCallback(() => setGs(newGameState()), []);
 
-  // ─── Distribute (skip columns with face-up King on top) ────────
+  // ─── Distribute (skip columns containing a face-up King) ───────
   const distribute = useCallback(() => {
     setGs(prev => {
       if (!prev || prev.gameOver || prev.stock.length === 0) return prev;
       const s = cloneGs(prev);
-      // Find eligible columns (no face-up King on top)
+      // Find eligible columns (no visible King anywhere)
       const eligible: number[] = [];
       for (let i = 0; i < 11; i++) {
-        if (!hasKingOnTop(s.columns[i])) {
+        if (!hasVisibleKing(s.columns[i])) {
           eligible.push(i);
         }
       }
