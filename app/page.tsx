@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 
 // ═══════════════════════════════════════════════════════════════════
 // Types
@@ -15,6 +15,11 @@ interface Card {
   value: number;
   faceUp: boolean;
 }
+
+type LastMove =
+  | { type: 'col'; index: number }
+  | { type: 'fdn'; index: number }
+  | { type: 'distribute' };
 
 // ═══════════════════════════════════════════════════════════════════
 // Constants
@@ -85,9 +90,10 @@ interface GameState {
   columns: Card[][];
   foundations: Card[][];
   stock: Card[];
-  selected: number | null; // column index or null
+  selected: number | null;
   gameOver: boolean;
   moves: number;
+  lastMove: LastMove | null;
 }
 
 function newGameState(): GameState {
@@ -109,6 +115,7 @@ function newGameState(): GameState {
     selected: null,
     gameOver: false,
     moves: 0,
+    lastMove: null,
   };
 }
 
@@ -132,28 +139,18 @@ function canPlaceOnColumn(card: Card, col: Card[]): boolean {
 
 function canPlaceOnFoundation(card: Card, fi: number, fdn: Card[]): boolean {
   if (fi < 4) {
-    // Suit foundation: A → R ascending
     if (card.kind !== 'suit' || card.suit !== SUITS[fi]) return false;
     return fdn.length === 0 ? card.value === 1 : card.value === fdn[fdn.length - 1].value + 1;
   }
-  // Trump foundation (index 4) — bidirectional
   if (card.kind === 'trump') {
     if (fdn.length === 0) return card.value === 1 || card.value === 21;
     const first = fdn[0];
     const top = fdn[fdn.length - 1];
     if (top.kind !== 'trump') return false;
-    if (first.value === 1) {
-      // Ascending: 1 → 21
-      return card.value === top.value + 1;
-    } else {
-      // Descending: 21 → 1
-      return card.value === top.value - 1;
-    }
+    if (first.value === 1) return card.value === top.value + 1;
+    return card.value === top.value - 1;
   }
-  if (card.kind === 'excuse') {
-    // Excuse goes last, after all 21 trumps
-    return fdn.length === 21;
-  }
+  if (card.kind === 'excuse') return fdn.length === 21;
   return false;
 }
 
@@ -204,22 +201,86 @@ function colHeight(col: Card[]): string {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// Sub-components
+// Sparkle effect component
 // ═══════════════════════════════════════════════════════════════════
 
-function CardFace({ card, selected, onClick, onDoubleClick }: {
+function SparkleOverlay() {
+  const particles = useMemo(() =>
+    Array.from({ length: 8 }, (_, i) => {
+      const angle = (i / 8) * Math.PI * 2 + (Math.random() - 0.5) * 0.4;
+      const dist = 14 + Math.random() * 16;
+      return {
+        x: Math.cos(angle) * dist,
+        y: Math.sin(angle) * dist,
+        delay: i * 0.035,
+        size: 3 + Math.random() * 3,
+        isStar: Math.random() > 0.5,
+      };
+    }), []
+  );
+
+  return (
+    <div style={{
+      position: 'absolute',
+      top: '50%',
+      left: '50%',
+      width: 0,
+      height: 0,
+      zIndex: 200,
+      pointerEvents: 'none',
+    }}>
+      {particles.map((p, i) => (
+        <div
+          key={i}
+          style={{
+            position: 'absolute',
+            width: p.size,
+            height: p.size,
+            marginLeft: -p.size / 2,
+            marginTop: -p.size / 2,
+            borderRadius: p.isStar ? '1px' : '50%',
+            background: p.isStar ? '#fde68a' : '#fbbf24',
+            boxShadow: `0 0 ${p.size}px ${p.isStar ? '#fde68a' : '#fbbf24'}`,
+            animation: `${p.isStar ? 'sparkle-star' : 'sparkle-fly'} 0.55s ${p.delay}s ease-out forwards`,
+            '--sx': `${p.x}px`,
+            '--sy': `${p.y}px`,
+          } as React.CSSProperties}
+        />
+      ))}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Card sub-components
+// ═══════════════════════════════════════════════════════════════════
+
+function CardFace({ card, selected, landing, appearing, appearDelay, onClick, onDoubleClick }: {
   card: Card;
   selected?: boolean;
+  landing?: boolean;
+  appearing?: boolean;
+  appearDelay?: number;
   onClick?: (e: React.MouseEvent) => void;
   onDoubleClick?: (e: React.MouseEvent) => void;
 }) {
   const color = textColor(card);
   const isExcuse = card.kind === 'excuse';
+
+  const animStyle: React.CSSProperties = {};
+  if (landing) {
+    animStyle.animation = 'card-land 0.45s ease-out';
+  } else if (selected) {
+    animStyle.animation = 'card-selected 0.2s ease-out forwards, glow-pulse 1.2s ease-in-out 0.2s infinite';
+  } else if (appearing) {
+    animStyle.animation = `card-appear 0.4s ${(appearDelay ?? 0) * 0.07}s ease-out both`;
+  }
+
   return (
     <div
       onClick={onClick}
       onDoubleClick={onDoubleClick}
-      className="cursor-pointer select-none transition-shadow"
+      className="cursor-pointer select-none"
       style={{
         width: 'var(--card-w)',
         height: 'var(--card-h)',
@@ -238,15 +299,14 @@ function CardFace({ card, selected, onClick, onDoubleClick }: {
         color,
         overflow: 'hidden',
         position: 'relative',
+        transition: 'background 0.15s, border-color 0.15s',
+        ...animStyle,
       }}
     >
       {isExcuse ? (
-        <div style={{ fontSize: 'var(--card-fs-lg)', lineHeight: 1 }}>
-          🃏
-        </div>
+        <div style={{ fontSize: 'var(--card-fs-lg)', lineHeight: 1 }}>🃏</div>
       ) : (
         <>
-          {/* Top-left corner */}
           <div style={{
             fontSize: 'var(--card-fs)',
             fontWeight: 700,
@@ -258,7 +318,6 @@ function CardFace({ card, selected, onClick, onDoubleClick }: {
             <span>{displayVal(card)}</span>
             <span style={{ fontSize: 'calc(var(--card-fs) * 0.85)' }}>{suitSym(card)}</span>
           </div>
-          {/* Center suit */}
           <div style={{
             position: 'absolute',
             top: '50%',
@@ -270,7 +329,6 @@ function CardFace({ card, selected, onClick, onDoubleClick }: {
           }}>
             {suitSym(card)}
           </div>
-          {/* Bottom-right corner (inverted) */}
           <div style={{
             position: 'absolute',
             bottom: 'calc(var(--card-fs) * 0.15)',
@@ -288,6 +346,8 @@ function CardFace({ card, selected, onClick, onDoubleClick }: {
           </div>
         </>
       )}
+      {/* Sparkle on landing */}
+      {landing && <SparkleOverlay />}
     </div>
   );
 }
@@ -337,10 +397,11 @@ function EmptySlot({ label, onClick }: { label: string; onClick?: (e: React.Mous
   );
 }
 
-function FoundationSlot({ fdn, fi, onClick }: {
+function FoundationSlot({ fdn, fi, onClick, landing }: {
   fdn: Card[];
   fi: number;
   onClick: () => void;
+  landing?: boolean;
 }) {
   const label = fi < 4 ? SUIT_SYM[SUITS[fi]] : '⚜';
   const fdnColor = fi < 4
@@ -373,9 +434,15 @@ function FoundationSlot({ fdn, fi, onClick }: {
     : null;
 
   return (
-    <div onClick={onClick} className="relative cursor-pointer">
-      <CardFace card={topCard} />
-      {/* Card count badge */}
+    <div
+      onClick={onClick}
+      className="relative cursor-pointer"
+      style={{
+        animation: landing ? 'fdn-glow 0.6s ease-out' : undefined,
+        borderRadius: 'var(--card-r)',
+      }}
+    >
+      <CardFace card={topCard} landing={landing} />
       <div
         className="absolute flex items-center justify-center"
         style={{
@@ -393,7 +460,6 @@ function FoundationSlot({ fdn, fi, onClick }: {
       >
         {fdn.length}
       </div>
-      {/* Direction indicator for trump foundation */}
       {dirLabel && (
         <div
           className="absolute flex items-center justify-center"
@@ -430,9 +496,19 @@ export default function Page() {
     setMounted(true);
   }, []);
 
+  // Clear lastMove after animation completes
+  useEffect(() => {
+    if (!gs?.lastMove) return;
+    const duration = gs.lastMove.type === 'distribute' ? 900 : 700;
+    const t = setTimeout(() => {
+      setGs(prev => prev ? { ...prev, lastMove: null } : prev);
+    }, duration);
+    return () => clearTimeout(t);
+  }, [gs?.moves, gs?.stock?.length]);
+
   const restart = useCallback(() => setGs(newGameState()), []);
 
-  // ─── Distribute: deal 1 card face-up to each column ──────────
+  // ─── Distribute ────────────────────────────────────────────────
   const distribute = useCallback(() => {
     setGs(prev => {
       if (!prev || prev.gameOver || prev.stock.length === 0) return prev;
@@ -444,6 +520,7 @@ export default function Page() {
         s.columns[i].push(card);
       }
       s.selected = null;
+      s.lastMove = { type: 'distribute' };
       return s;
     });
   }, []);
@@ -456,13 +533,12 @@ export default function Page() {
       const col = s.columns[ci];
 
       if (s.selected !== null) {
-        // Same column → deselect
         if (s.selected === ci) {
           s.selected = null;
+          s.lastMove = null;
           return s;
         }
 
-        // Get the selected card (bottom of source column)
         const srcCol = s.columns[s.selected];
         const card = srcCol.length > 0 ? srcCol[srcCol.length - 1] : null;
 
@@ -472,21 +548,23 @@ export default function Page() {
           col.push(card);
           s.selected = null;
           s.moves++;
+          s.lastMove = { type: 'col', index: ci };
           return s;
         }
 
-        // Invalid placement: re-select this column if face-up bottom
         if (col.length > 0 && col[col.length - 1].faceUp) {
           s.selected = ci;
+          s.lastMove = null;
           return s;
         }
         s.selected = null;
+        s.lastMove = null;
         return s;
       }
 
-      // No selection → select bottom card
       if (col.length === 0 || !col[col.length - 1].faceUp) return prev;
       s.selected = ci;
+      s.lastMove = null;
       return s;
     });
   }, []);
@@ -497,7 +575,6 @@ export default function Page() {
       if (!prev || prev.gameOver || prev.selected === null) return prev;
       const s = cloneGs(prev);
       const sel = s.selected!;
-
       const srcCol = s.columns[sel];
       const card = srcCol.length > 0 ? srcCol[srcCol.length - 1] : null;
 
@@ -511,12 +588,13 @@ export default function Page() {
       s.foundations[fi].push(card);
       s.selected = null;
       s.moves++;
+      s.lastMove = { type: 'fdn', index: fi };
       if (isWin(s.foundations)) s.gameOver = true;
       return s;
     });
   }, []);
 
-  // ─── Double-click auto-place on foundation ─────────────────────
+  // ─── Double-click auto-place ───────────────────────────────────
   const autoPlace = useCallback((ci: number) => {
     setGs(prev => {
       if (!prev || prev.gameOver) return prev;
@@ -533,6 +611,7 @@ export default function Page() {
       s.foundations[fi].push(card);
       s.selected = null;
       s.moves++;
+      s.lastMove = { type: 'fdn', index: fi };
       if (isWin(s.foundations)) s.gameOver = true;
       return s;
     });
@@ -558,6 +637,7 @@ export default function Page() {
   }
 
   const totalInFoundations = gs.foundations.reduce((sum, f) => sum + f.length, 0);
+  const lm = gs.lastMove;
 
   return (
     <div
@@ -566,7 +646,7 @@ export default function Page() {
         background: 'radial-gradient(ellipse at center, #1a5c2a 0%, #0d3315 60%, #091f0e 100%)',
       }}
       onClick={() => {
-        if (gs.selected !== null) setGs(prev => prev ? ({ ...cloneGs(prev), selected: null }) : prev);
+        if (gs.selected !== null) setGs(prev => prev ? ({ ...cloneGs(prev), selected: null, lastMove: null }) : prev);
       }}
     >
       <div
@@ -609,7 +689,7 @@ export default function Page() {
 
         {/* ─── Top row: Stock + Foundations ────────────────────── */}
         <div className="flex items-start gap-1 sm:gap-2 mb-3 sm:mb-4">
-          {/* Stock — click to distribute */}
+          {/* Stock */}
           <div onClick={(e) => { e.stopPropagation(); distribute(); }}>
             {gs.stock.length > 0 ? (
               <div className="relative">
@@ -635,7 +715,6 @@ export default function Page() {
             )}
           </div>
 
-          {/* Distribute label */}
           {gs.stock.length > 0 && (
             <button
               onClick={(e) => { e.stopPropagation(); distribute(); }}
@@ -653,13 +732,17 @@ export default function Page() {
             </button>
           )}
 
-          {/* Spacer */}
           <div className="flex-1" />
 
           {/* Foundations */}
           {[0, 1, 2, 3, 4].map(fi => (
             <div key={fi} onClick={(e) => { e.stopPropagation(); clickFoundation(fi); }}>
-              <FoundationSlot fdn={gs.foundations[fi]} fi={fi} onClick={() => {}} />
+              <FoundationSlot
+                fdn={gs.foundations[fi]}
+                fi={fi}
+                onClick={() => {}}
+                landing={lm?.type === 'fdn' && lm.index === fi}
+              />
             </div>
           ))}
         </div>
@@ -682,31 +765,40 @@ export default function Page() {
               {col.length === 0 ? (
                 <EmptySlot label="" onClick={() => {}} />
               ) : (
-                col.map((card, idx) => (
-                  <div
-                    key={card.id}
-                    className="absolute left-0"
-                    style={{
-                      top: cardTopCss(col, idx),
-                      zIndex: idx,
-                      width: 'var(--card-w)',
-                    }}
-                  >
-                    {card.faceUp ? (
-                      <CardFace
-                        card={card}
-                        selected={gs.selected === ci && idx === col.length - 1}
-                        onClick={(e) => { e.stopPropagation(); clickColumn(ci); }}
-                        onDoubleClick={(e) => {
-                          e.stopPropagation();
-                          if (idx === col.length - 1) autoPlace(ci);
-                        }}
-                      />
-                    ) : (
-                      <CardBack />
-                    )}
-                  </div>
-                ))
+                col.map((card, idx) => {
+                  const isLast = idx === col.length - 1;
+                  const isColLanding = isLast && lm?.type === 'col' && lm.index === ci;
+                  const isDistributed = isLast && lm?.type === 'distribute';
+
+                  return (
+                    <div
+                      key={card.id}
+                      className="absolute left-0"
+                      style={{
+                        top: cardTopCss(col, idx),
+                        zIndex: idx,
+                        width: 'var(--card-w)',
+                      }}
+                    >
+                      {card.faceUp ? (
+                        <CardFace
+                          card={card}
+                          selected={gs.selected === ci && isLast}
+                          landing={isColLanding}
+                          appearing={isDistributed}
+                          appearDelay={ci}
+                          onClick={(e) => { e.stopPropagation(); clickColumn(ci); }}
+                          onDoubleClick={(e) => {
+                            e.stopPropagation();
+                            if (isLast) autoPlace(ci);
+                          }}
+                        />
+                      ) : (
+                        <CardBack />
+                      )}
+                    </div>
+                  );
+                })
               )}
             </div>
           ))}
@@ -717,7 +809,7 @@ export default function Page() {
           <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
             <div
               className="bg-white rounded-xl p-6 sm:p-8 text-center shadow-2xl mx-4"
-              style={{ fontFamily: 'Georgia, serif' }}
+              style={{ fontFamily: 'Georgia, serif', animation: 'card-land 0.5s ease-out' }}
             >
               <div className="text-4xl sm:text-5xl mb-3">🎉</div>
               <h2 className="text-2xl sm:text-3xl font-bold mb-2 text-gray-800">
