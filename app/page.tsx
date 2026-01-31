@@ -115,20 +115,14 @@ function hasVisibleKing(col: Card[]): boolean {
 // Game state
 // ═══════════════════════════════════════════════════════════════════
 
-interface HintMove {
-  fromCol: number;
-  fromCardIndex: number;
-  toCol: number;
-}
-
 interface CheatState {
-  hintUsed: boolean;
+  peekUsed: boolean;
   slowDistUsed: boolean;
-  activeCheat: 'hint' | 'slowDist' | null;
+  activeCheat: 'peek' | 'slowDist' | null;
   slowDistMode: boolean;
   slowDistEligible: number[];
-  hintMoves: [HintMove, HintMove] | null;
-  hintStep: number;
+  peekColIndex: number | null;
+  peekUntil: number | null;
 }
 
 interface GameState {
@@ -167,13 +161,13 @@ function newGameState(): GameState {
     lastMove: null,
     trumpsMerged: false,
     cheat: {
-      hintUsed: false,
+      peekUsed: false,
       slowDistUsed: false,
       activeCheat: null,
       slowDistMode: false,
       slowDistEligible: [],
-      hintMoves: null,
-      hintStep: 0,
+      peekColIndex: null,
+      peekUntil: null,
     },
   };
 }
@@ -301,129 +295,6 @@ function seqStart(col: Card[]): number {
   return i;
 }
 
-// ═══════════════════════════════════════════════════════════════════
-// Cheat: Mysterio — powerful multi-move solver
-// ═══════════════════════════════════════════════════════════════════
-
-// Lightweight game snapshot for solver (no deep clone needed — we copy arrays)
-interface SolverState {
-  columns: Card[][];
-  foundations: Card[][];
-  excuseSlot: Card | null;
-  trumpsMerged: boolean;
-}
-
-function cloneSolver(st: SolverState): SolverState {
-  return {
-    columns: st.columns.map(c => [...c]),
-    foundations: st.foundations.map(f => [...f]),
-    excuseSlot: st.excuseSlot,
-    trumpsMerged: st.trumpsMerged,
-  };
-}
-
-// Score a state: higher is better (more cards placed + revealed)
-function scoreSolver(st: SolverState): number {
-  let score = 0;
-  // Foundation cards are worth a lot
-  for (const f of st.foundations) score += f.length * 10;
-  if (st.excuseSlot) score += 10;
-  // Face-up cards in columns are worth some
-  for (const col of st.columns) {
-    for (const c of col) if (c.faceUp) score += 1;
-  }
-  // Empty columns are valuable
-  for (const col of st.columns) if (col.length === 0) score += 5;
-  return score;
-}
-
-// Generate all valid moves from a solver state, returns [action description, resulting state]
-function solverMoves(st: SolverState): { move: HintMove; state: SolverState }[] {
-  const results: { move: HintMove; state: SolverState }[] = [];
-
-  for (let fc = 0; fc < 11; fc++) {
-    const col = st.columns[fc];
-    if (col.length === 0) continue;
-    const ss = seqStart(col);
-
-    // Column-to-column moves
-    for (let tc = 0; tc < 11; tc++) {
-      if (fc === tc) continue;
-      if (!canPlaceOnColumn(col[ss], st.columns[tc])) continue;
-      const ns = cloneSolver(st);
-      const moved = ns.columns[fc].splice(ss);
-      ns.columns[tc].push(...moved);
-      if (ns.columns[fc].length > 0 && !ns.columns[fc][ns.columns[fc].length - 1].faceUp) {
-        ns.columns[fc][ns.columns[fc].length - 1] = { ...ns.columns[fc][ns.columns[fc].length - 1], faceUp: true };
-      }
-      results.push({ move: { fromCol: fc, fromCardIndex: ss, toCol: tc }, state: ns });
-    }
-
-    // Top card to foundation
-    const top = col[col.length - 1];
-    if (top.kind === 'excuse' && !st.excuseSlot) {
-      const ns = cloneSolver(st);
-      ns.columns[fc].pop();
-      if (ns.columns[fc].length > 0 && !ns.columns[fc][ns.columns[fc].length - 1].faceUp) {
-        ns.columns[fc][ns.columns[fc].length - 1] = { ...ns.columns[fc][ns.columns[fc].length - 1], faceUp: true };
-      }
-      ns.excuseSlot = top;
-      // toCol = -1 signals "to excuse slot"
-      results.push({ move: { fromCol: fc, fromCardIndex: col.length - 1, toCol: -1 }, state: ns });
-    }
-    const fi = findFoundation(top, st.foundations, st.trumpsMerged);
-    if (fi !== -1) {
-      const ns = cloneSolver(st);
-      ns.columns[fc].pop();
-      if (ns.columns[fc].length > 0 && !ns.columns[fc][ns.columns[fc].length - 1].faceUp) {
-        ns.columns[fc][ns.columns[fc].length - 1] = { ...ns.columns[fc][ns.columns[fc].length - 1], faceUp: true };
-      }
-      ns.foundations[fi] = [...ns.foundations[fi], top];
-      // toCol = -2 - fi signals "to foundation fi"
-      results.push({ move: { fromCol: fc, fromCardIndex: col.length - 1, toCol: -2 - fi }, state: ns });
-    }
-  }
-
-  return results;
-}
-
-// Find the best 2-move sequence using BFS with scoring
-function findTwoMoveHint(gs: GameState): [HintMove, HintMove] | null {
-  const initial: SolverState = {
-    columns: gs.columns.map(c => [...c]),
-    foundations: gs.foundations.map(f => [...f]),
-    excuseSlot: gs.excuseSlot,
-    trumpsMerged: gs.trumpsMerged,
-  };
-  const baseScore = scoreSolver(initial);
-
-  let best: { moves: [HintMove, HintMove]; score: number } | null = null;
-
-  // Depth 1
-  const moves1 = solverMoves(initial);
-  for (const m1 of moves1) {
-    // Depth 2
-    const moves2 = solverMoves(m1.state);
-    for (const m2 of moves2) {
-      const s2 = scoreSolver(m2.state);
-      if (s2 > baseScore && (!best || s2 > best.score)) {
-        best = { moves: [m1.move, m2.move], score: s2 };
-      }
-      // Depth 3: check if any third move leads to even higher score
-      // (we still only execute 2 moves but pick the pair that enables the best 3rd)
-      const moves3 = solverMoves(m2.state);
-      for (const m3 of moves3) {
-        const s3 = scoreSolver(m3.state);
-        if (s3 > baseScore + 5 && (!best || s3 > best.score + 3)) {
-          // Bonus: this 2-move pair sets up a great 3rd move
-          best = { moves: [m1.move, m2.move], score: s3 };
-        }
-      }
-    }
-  }
-
-  return best?.moves ?? null;
-}
 
 // ═══════════════════════════════════════════════════════════════════
 // State helpers
@@ -432,7 +303,7 @@ function findTwoMoveHint(gs: GameState): [HintMove, HintMove] | null {
 function cloneGs(gs: GameState): GameState {
   return {
     ...gs,
-    cheat: { ...gs.cheat, slowDistEligible: [...gs.cheat.slowDistEligible], hintMoves: gs.cheat.hintMoves ? [...gs.cheat.hintMoves] as [HintMove, HintMove] : null },
+    cheat: { ...gs.cheat, slowDistEligible: [...gs.cheat.slowDistEligible] },
     columns: gs.columns.map(c => c.map(card => ({ ...card }))),
     foundations: gs.foundations.map(f => f.map(card => ({ ...card }))),
     stock: gs.stock.map(c => ({ ...c })),
@@ -829,7 +700,7 @@ export default function Page() {
     return () => clearTimeout(t);
   }, [gs?.moves, gs?.stock?.length]);
 
-  const restart = useCallback(() => setGs(newGameState()), []);
+  const restart = useCallback(() => { setPeekMode(false); setPeekCol(null); setGs(newGameState()); }, []);
 
   // ─── Distribute (skip columns containing a face-up King) ───────
   const distribute = useCallback(() => {
@@ -864,14 +735,14 @@ export default function Page() {
       const ss = seqStart(col); // first index of the movable sequence
 
       if (s.selected !== null) {
-        // Clicking the already-selected sequence toggles it off
-        if (s.selected.from === 'col' && s.selected.index === ci && s.selected.cardIndex === ss) {
+        // Clicking the already-selected card/sub-sequence toggles it off
+        if (s.selected.from === 'col' && s.selected.index === ci && s.selected.cardIndex === cardIdx) {
           s.selected = null; s.lastMove = null; return s;
         }
-        // Clicking on the same column: re-select this column's sequence (or deselect if not in seq)
+        // Clicking on the same column: re-select from clicked card (or deselect if not in seq)
         if (s.selected.from === 'col' && s.selected.index === ci) {
           if (col[cardIdx]?.faceUp && cardIdx >= ss) {
-            s.selected = { from: 'col', index: ci, cardIndex: ss }; s.lastMove = null; return s;
+            s.selected = { from: 'col', index: ci, cardIndex: cardIdx }; s.lastMove = null; return s;
           }
           s.selected = null; s.lastMove = null; return s;
         }
@@ -884,15 +755,15 @@ export default function Page() {
           s.lastMove = { type: 'col', index: ci };
           return s;
         }
-        // Placement failed: select this column's sequence instead (if clicked card is in seq)
+        // Placement failed: select from clicked card instead (if in seq)
         if (col[cardIdx]?.faceUp && cardIdx >= ss) {
-          s.selected = { from: 'col', index: ci, cardIndex: ss }; s.lastMove = null; return s;
+          s.selected = { from: 'col', index: ci, cardIndex: cardIdx }; s.lastMove = null; return s;
         }
         s.selected = null; s.lastMove = null; return s;
       }
-      // No current selection: select the sequence (only if clicked card is in the seq)
+      // No current selection: select from clicked card (only if in the seq)
       if (!col[cardIdx]?.faceUp || cardIdx < ss) return prev;
-      s.selected = { from: 'col', index: ci, cardIndex: ss }; s.lastMove = null;
+      s.selected = { from: 'col', index: ci, cardIndex: cardIdx }; s.lastMove = null;
       return s;
     });
   }, []);
@@ -1028,66 +899,48 @@ export default function Page() {
     });
   }, []);
 
-  // ─── Cheat: Hint (2-move solution) ──────────────────────────────
-  const activateHintCheat = useCallback(() => {
+  // ─── Cheat: Peek (reveal hidden cards in a column for 5s) ──────
+  const activatePeekCheat = useCallback(() => {
     setGs(prev => {
-      if (!prev || prev.gameOver || prev.cheat.hintUsed) return prev;
-      const hint = findTwoMoveHint(prev);
-      if (!hint) return prev; // no solution found
+      if (!prev || prev.gameOver || prev.cheat.peekUsed) return prev;
       const s = cloneGs(prev);
-      s.cheat.hintUsed = true;
-      s.cheat.activeCheat = 'hint';
-      s.cheat.hintMoves = hint;
-      s.cheat.hintStep = 0;
+      s.cheat.peekUsed = true;
+      s.cheat.activeCheat = 'peek';
       s.selected = null;
       return s;
     });
   }, []);
 
-  // After animation ends, apply the hint moves automatically
+  // State for peek mode: waiting for column selection, then revealing
+  const [peekMode, setPeekMode] = useState(false);
+  const [peekCol, setPeekCol] = useState<number | null>(null);
+
+  const selectPeekColumn = useCallback((ci: number) => {
+    if (!peekMode || peekCol !== null) return;
+    if (!gs || gs.columns[ci].length === 0) return;
+    // Check if column has hidden cards
+    const hasHidden = gs.columns[ci].some(c => !c.faceUp);
+    if (!hasHidden) return;
+    setPeekCol(ci);
+    setPeekMode(false);
+    // Auto-hide after 5 seconds
+    setTimeout(() => {
+      setPeekCol(null);
+    }, 5000);
+  }, [peekMode, peekCol, gs]);
+
+  // After peek animation ends, enter peek column selection mode
   useEffect(() => {
     if (!gs?.cheat.activeCheat) return;
-    if (gs.cheat.activeCheat === 'hint') {
+    if (gs.cheat.activeCheat === 'peek') {
       const t = setTimeout(() => {
         setGs(prev => {
           if (!prev) return prev;
           const s = cloneGs(prev);
           s.cheat.activeCheat = null;
-          // Execute both hint moves
-          if (s.cheat.hintMoves) {
-            for (const mv of s.cheat.hintMoves) {
-              const col = s.columns[mv.fromCol];
-              if (mv.toCol === -1) {
-                // Move to excuse slot
-                const card = col.pop()!;
-                revealBottom(col);
-                card.faceUp = true;
-                s.excuseSlot = card;
-                s.moves++;
-                s.lastMove = { type: 'excuse' };
-              } else if (mv.toCol < -1) {
-                // Move to foundation
-                const fi = -2 - mv.toCol;
-                const card = col.pop()!;
-                revealBottom(col);
-                s.foundations[fi].push(card);
-                s.moves++;
-                s.lastMove = { type: 'fdn', index: fi };
-                if (isWin(s)) s.gameOver = true;
-              } else {
-                // Column-to-column move
-                const ss = seqStart(col);
-                const moved = col.splice(ss);
-                s.columns[mv.toCol].push(...moved);
-                revealBottom(col);
-                s.moves++;
-                s.lastMove = { type: 'col', index: mv.toCol };
-              }
-            }
-          }
-          s.cheat.hintMoves = null;
           return s;
         });
+        setPeekMode(true);
       }, 1800);
       return () => clearTimeout(t);
     }
@@ -1417,10 +1270,23 @@ export default function Page() {
         <div ref={boardRef} style={{
           display: 'grid', gridTemplateColumns: 'repeat(11, 1fr)', gap: '1px',
         }}>
-          {gs.columns.map((col, ci) => (
-            <div key={ci} className="relative" style={{ minHeight: colHeight(col) }}
+          {gs.columns.map((col, ci) => {
+            const isPeeking = peekCol === ci;
+            const hasHidden = col.some(c => !c.faceUp);
+            const isPeekTarget = peekMode && col.length > 0 && hasHidden;
+            return (
+            <div key={ci} className="relative" style={{
+                minHeight: colHeight(col),
+                outline: isPeekTarget ? '2px solid rgba(219,39,119,0.7)' : isPeeking ? '2px solid rgba(219,39,119,0.5)' : 'none',
+                borderRadius: '4px',
+                cursor: isPeekTarget ? 'pointer' : undefined,
+              }}
               data-drop-target={`col-${ci}`}
-              onClick={(e) => { e.stopPropagation(); clickColumn(ci); }}>
+              onClick={(e) => {
+                e.stopPropagation();
+                if (peekMode && isPeekTarget) { selectPeekColumn(ci); return; }
+                clickColumn(ci);
+              }}>
               {col.length === 0 ? (
                 <EmptySlot label="" onClick={() => {}} />
               ) : (
@@ -1434,13 +1300,15 @@ export default function Page() {
                     && idx >= gs.selected.cardIndex;
                   const isDragSource = drag?.dragging && drag.from.from === 'col'
                     && drag.from.index === ci && idx >= drag.from.cardIndex;
+                  const showPeeked = isPeeking && !card.faceUp;
                   return (
                     <div key={card.id} className="absolute left-0"
                       style={{
                         top: cardTopCss(col, idx), zIndex: idx, width: 'var(--card-w)',
-                        opacity: isDragSource ? 0.3 : 1,
+                        opacity: isDragSource ? 0.3 : showPeeked ? 0.7 : 1,
+                        filter: showPeeked ? 'drop-shadow(0 0 4px rgba(219,39,119,0.6))' : undefined,
                       }}>
-                      {card.faceUp ? (
+                      {(card.faceUp || showPeeked) ? (
                         <CardFace
                           card={card}
                           selected={isInSelection && !drag?.dragging}
@@ -1449,23 +1317,25 @@ export default function Page() {
                           appearDelay={ci}
                           onClick={(e) => {
                             e.stopPropagation();
+                            if (peekMode && isPeekTarget) { selectPeekColumn(ci); return; }
                             if (wasDraggingRef.current || dragRef.current?.dragging) return;
+                            if (!card.faceUp) return;
                             clickCard(ci, idx);
                           }}
-                          onDoubleClick={(e) => { e.stopPropagation(); if (isLast) autoPlace(ci); }}
-                          onTouchStart={handleTouchStart}
-                          onTouchEnd={(e) => handleTouchEnd(ci, idx, isLast, e)}
-                          onPointerDown={inSeq ? (e) => {
+                          onDoubleClick={(e) => { e.stopPropagation(); if (isLast && card.faceUp) autoPlace(ci); }}
+                          onTouchStart={card.faceUp ? handleTouchStart : undefined}
+                          onTouchEnd={card.faceUp ? (e) => handleTouchEnd(ci, idx, isLast, e) : undefined}
+                          onPointerDown={(inSeq && card.faceUp) ? (e) => {
                             e.stopPropagation();
-                            const cards = col.slice(ss);
+                            const cards = col.slice(idx);
                             handleDragStart(
-                              { from: 'col', index: ci, cardIndex: ss },
+                              { from: 'col', index: ci, cardIndex: idx },
                               cards, e
                             );
                           } : undefined}
                         />
                       ) : (
-                        <CardBack />
+                        <CardBack onClick={isPeekTarget ? () => selectPeekColumn(ci) : undefined} />
                       )}
                     </div>
                   );
@@ -1473,7 +1343,7 @@ export default function Page() {
               })()
               )}
             </div>
-          ))}
+          );})}
         </div>
 
         {/* ─── Bottom bar: Stock + Excuse + Foundations ─── */}
@@ -1644,34 +1514,52 @@ export default function Page() {
           </div>
         )}
 
+        {/* ─── Peek mode: select a column to reveal ──── */}
+        {peekMode && (
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            gap: '8px', marginTop: '4px', paddingBottom: '4px',
+          }}>
+            <div style={{
+              fontSize: 'clamp(9px, 1.8vw, 14px)', padding: '6px 16px',
+              background: 'linear-gradient(135deg, #db2777, #be185d)',
+              color: '#fce7f3', border: '1px solid rgba(219,39,119,0.6)',
+              borderRadius: '8px',
+              fontFamily: "'SF Pro Display', -apple-system, sans-serif",
+              fontWeight: 700, animation: 'slow-dist-pulse 1.5s ease-in-out infinite',
+              textAlign: 'center' as const,
+            }}>Choisis une colonne avec des cartes cach&#233;es</div>
+          </div>
+        )}
+
         {/* ─── Cheat buttons ──────────────────────────── */}
-        {!gs.gameOver && !gs.cheat.slowDistMode && !gs.cheat.activeCheat && (
+        {!gs.gameOver && !gs.cheat.slowDistMode && !gs.cheat.activeCheat && !peekMode && peekCol === null && (
           <div style={{
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             gap: '8px', marginTop: '4px', paddingBottom: '4px',
           }}>
             <button
-              onClick={(e) => { e.stopPropagation(); activateHintCheat(); }}
-              disabled={gs.cheat.hintUsed}
+              onClick={(e) => { e.stopPropagation(); activatePeekCheat(); }}
+              disabled={gs.cheat.peekUsed}
               style={{
                 fontSize: 'clamp(8px, 1.6vw, 12px)', padding: '5px 12px',
-                background: gs.cheat.hintUsed
+                background: gs.cheat.peekUsed
                   ? 'rgba(255,255,255,0.03)'
-                  : 'linear-gradient(135deg, #9333ea 0%, #7c3aed 40%, #6d28d9 100%)',
-                color: gs.cheat.hintUsed ? 'rgba(255,255,255,0.15)' : '#f3e8ff',
-                border: gs.cheat.hintUsed
+                  : 'linear-gradient(135deg, #db2777 0%, #be185d 40%, #9d174d 100%)',
+                color: gs.cheat.peekUsed ? 'rgba(255,255,255,0.15)' : '#fce7f3',
+                border: gs.cheat.peekUsed
                   ? '1px solid rgba(255,255,255,0.05)'
-                  : '1px solid rgba(168,85,247,0.6)',
+                  : '1px solid rgba(219,39,119,0.6)',
                 borderRadius: '999px',
-                cursor: gs.cheat.hintUsed ? 'default' : 'pointer',
+                cursor: gs.cheat.peekUsed ? 'default' : 'pointer',
                 fontFamily: "'SF Pro Display', -apple-system, sans-serif",
-                fontWeight: 700, opacity: gs.cheat.hintUsed ? 0.4 : 1,
+                fontWeight: 700, opacity: gs.cheat.peekUsed ? 0.4 : 1,
                 letterSpacing: '0.03em',
-                boxShadow: gs.cheat.hintUsed ? 'none' : '0 2px 8px rgba(147,51,234,0.4), inset 0 1px 0 rgba(255,255,255,0.15)',
-                textShadow: gs.cheat.hintUsed ? 'none' : '0 1px 2px rgba(0,0,0,0.3)',
+                boxShadow: gs.cheat.peekUsed ? 'none' : '0 2px 8px rgba(219,39,119,0.4), inset 0 1px 0 rgba(255,255,255,0.15)',
+                textShadow: gs.cheat.peekUsed ? 'none' : '0 1px 2px rgba(0,0,0,0.3)',
                 transition: 'transform 0.15s, box-shadow 0.15s',
               }}
-            >{gs.cheat.hintUsed ? 'Mysterio' : 'Mysterio'}</button>
+            >{gs.cheat.peekUsed ? 'Petite fille' : 'Petite fille'}</button>
             <button
               onClick={(e) => { e.stopPropagation(); activateSlowDistCheat(); }}
               disabled={gs.cheat.slowDistUsed || gs.stock.length === 0}
@@ -1705,26 +1593,26 @@ export default function Page() {
             style={{
               zIndex: 2000, pointerEvents: 'none',
               animation: 'cheat-overlay-in 1.8s ease-out forwards',
-              background: gs.cheat.activeCheat === 'hint'
-                ? 'radial-gradient(ellipse at center, rgba(124,58,237,0.4) 0%, rgba(0,0,0,0.8) 70%)'
+              background: gs.cheat.activeCheat === 'peek'
+                ? 'radial-gradient(ellipse at center, rgba(219,39,119,0.4) 0%, rgba(0,0,0,0.8) 70%)'
                 : 'radial-gradient(ellipse at center, rgba(5,150,105,0.4) 0%, rgba(0,0,0,0.8) 70%)',
             }}
           >
             {/* Flash */}
             <div className="absolute inset-0" style={{
-              background: gs.cheat.activeCheat === 'hint'
-                ? 'rgba(168, 85, 247, 1)'
+              background: gs.cheat.activeCheat === 'peek'
+                ? 'rgba(219, 39, 119, 1)'
                 : 'rgba(16, 185, 129, 1)',
               animation: 'cheat-flash 1.8s ease-out forwards',
             }} />
-            {/* Skull / Icon */}
+            {/* Icon */}
             <div style={{
               position: 'absolute', top: '38%', left: '50%',
               fontSize: 'clamp(60px, 15vw, 120px)',
               animation: 'cheat-skull 1.8s ease-out forwards',
               filter: 'drop-shadow(0 0 30px rgba(255,255,255,0.3))',
             }}>
-              {gs.cheat.activeCheat === 'hint' ? '🔮' : '🍇'}
+              {gs.cheat.activeCheat === 'peek' ? '👧' : '🍇'}
             </div>
             {/* Text */}
             <div style={{
@@ -1735,12 +1623,12 @@ export default function Page() {
               fontWeight: 900, letterSpacing: '0.1em',
               textTransform: 'uppercase',
               color: '#fff',
-              textShadow: gs.cheat.activeCheat === 'hint'
-                ? '0 0 20px rgba(168,85,247,0.8), 0 0 40px rgba(168,85,247,0.4)'
+              textShadow: gs.cheat.activeCheat === 'peek'
+                ? '0 0 20px rgba(219,39,119,0.8), 0 0 40px rgba(219,39,119,0.4)'
                 : '0 0 20px rgba(16,185,129,0.8), 0 0 40px rgba(16,185,129,0.4)',
               whiteSpace: 'nowrap',
             }}>
-              {gs.cheat.activeCheat === 'hint' ? 'MYSTERIO !' : 'TRICHE DE L\'AUDE !'}
+              {gs.cheat.activeCheat === 'peek' ? 'PETITE FILLE !' : 'TRICHE DE L\'AUDE !'}
             </div>
           </div>
         )}
