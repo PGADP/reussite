@@ -185,13 +185,19 @@ function newGameState(): GameState {
 function canPlaceOnColumn(card: Card, col: Card[]): boolean {
   if (card.kind === 'excuse') return col.length > 0;
   if (col.length === 0) return card.kind === 'suit' && card.value === 14;
-  const top = col[col.length - 1];
-  if (top.kind === 'excuse') return true;
+  // Find the real (non-excuse) card at the top and count how many excuses sit above it
+  let gap = 0;
+  let realIdx = col.length - 1;
+  while (realIdx >= 0 && col[realIdx].kind === 'excuse') { gap++; realIdx--; }
+  if (realIdx < 0) return true; // column is all excuses — accept anything
+  const real = col[realIdx];
+  const expectedValue = real.value - (gap + 1);
   if (card.kind === 'trump') {
-    return top.kind === 'trump' && card.value === top.value - 1;
+    return real.kind === 'trump' && card.value === expectedValue;
   }
-  if (top.kind === 'suit') {
-    return isRed(card) !== isRed(top) && card.value === top.value - 1;
+  if (real.kind === 'suit') {
+    const colorOk = (gap + 1) % 2 === 1 ? isRed(card) !== isRed(real) : isRed(card) === isRed(real);
+    return card.kind === 'suit' && card.value === expectedValue && colorOk;
   }
   return false;
 }
@@ -247,7 +253,8 @@ function isWin(gs: GameState): boolean {
 // Find the start index of the movable sequence at the bottom of a column.
 // A sequence is a contiguous run of face-up cards where each card could be
 // legally placed on the one below it (alternating color for suits, consecutive
-// for trumps). Only the entire sequence can be moved — no cutting allowed.
+// for trumps). The excuse acts as a transparent joker — it takes the place of
+// whatever card is logically expected and the sequence continues through it.
 function seqStart(col: Card[]): number {
   if (col.length === 0) return 0;
   let i = col.length - 1;
@@ -255,9 +262,33 @@ function seqStart(col: Card[]): number {
     const cur = col[i];
     const prev = col[i - 1];
     if (!cur.faceUp || !prev.faceUp) break;
-    // Excuse breaks sequence
-    if (cur.kind === 'excuse' || prev.kind === 'excuse') break;
-    // Check if cur is a valid continuation of prev
+
+    // If prev is excuse, find the real card above it to check continuity
+    if (prev.kind === 'excuse') {
+      // Find the next real (non-excuse) card above
+      let k = i - 2;
+      while (k >= 0 && col[k].kind === 'excuse' && col[k].faceUp) k--;
+      if (k < 0 || !col[k].faceUp) { i--; continue; } // only excuses above, keep going
+      const real = col[k];
+      // cur must be a valid continuation of real, accounting for the gap
+      const gap = i - k; // number of positions between real and cur
+      if (cur.kind === 'trump' && real.kind === 'trump') {
+        if (cur.value !== real.value - gap) break;
+      } else if (cur.kind === 'suit' && real.kind === 'suit') {
+        if (cur.value !== real.value - gap) break;
+        // For suits, alternating color check: with odd gap, must differ; even gap, must match
+        if ((gap % 2 === 1) === (isRed(cur) === isRed(real))) break;
+      } else if (cur.kind !== 'excuse') {
+        break; // Mixed trump/suit
+      }
+      i--;
+      continue;
+    }
+
+    // If cur is excuse, it's always valid in the sequence (transparent)
+    if (cur.kind === 'excuse') { i--; continue; }
+
+    // Normal card-to-card check
     if (cur.kind === 'trump' && prev.kind === 'trump') {
       if (cur.value !== prev.value - 1) break;
     } else if (cur.kind === 'suit' && prev.kind === 'suit') {
@@ -271,134 +302,127 @@ function seqStart(col: Card[]): number {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// Cheat: 2-move hint solver
+// Cheat: Mysterio — powerful multi-move solver
 // ═══════════════════════════════════════════════════════════════════
 
-// Simulate a column move (seq from fromCol starting at cardIdx → toCol)
-// Returns a new columns array (shallow-cloned) or null if invalid
-function simulateColMove(columns: Card[][], fromCol: number, cardIdx: number, toCol: number): Card[][] | null {
-  const src = columns[fromCol];
-  const dst = columns[toCol];
-  if (fromCol === toCol) return null;
-  if (cardIdx < 0 || cardIdx >= src.length) return null;
-  const card = src[cardIdx];
-  if (!card.faceUp) return null;
-  if (!canPlaceOnColumn(card, dst)) return null;
-  // Clone columns
-  const newCols = columns.map(c => [...c]);
-  const moved = newCols[fromCol].splice(cardIdx);
-  newCols[toCol].push(...moved);
-  // Reveal bottom card
-  if (newCols[fromCol].length > 0 && !newCols[fromCol][newCols[fromCol].length - 1].faceUp) {
-    newCols[fromCol][newCols[fromCol].length - 1] = { ...newCols[fromCol][newCols[fromCol].length - 1], faceUp: true };
+// Lightweight game snapshot for solver (no deep clone needed — we copy arrays)
+interface SolverState {
+  columns: Card[][];
+  foundations: Card[][];
+  excuseSlot: Card | null;
+  trumpsMerged: boolean;
+}
+
+function cloneSolver(st: SolverState): SolverState {
+  return {
+    columns: st.columns.map(c => [...c]),
+    foundations: st.foundations.map(f => [...f]),
+    excuseSlot: st.excuseSlot,
+    trumpsMerged: st.trumpsMerged,
+  };
+}
+
+// Score a state: higher is better (more cards placed + revealed)
+function scoreSolver(st: SolverState): number {
+  let score = 0;
+  // Foundation cards are worth a lot
+  for (const f of st.foundations) score += f.length * 10;
+  if (st.excuseSlot) score += 10;
+  // Face-up cards in columns are worth some
+  for (const col of st.columns) {
+    for (const c of col) if (c.faceUp) score += 1;
   }
-  return newCols;
+  // Empty columns are valuable
+  for (const col of st.columns) if (col.length === 0) score += 5;
+  return score;
 }
 
-// Check if a state has any foundation-placeable card (= "unblocked")
-function hasFoundationMove(columns: Card[][], foundations: Card[][], merged: boolean, excuseSlot: Card | null): boolean {
-  for (let ci = 0; ci < columns.length; ci++) {
-    const col = columns[ci];
-    if (col.length === 0) continue;
-    const top = col[col.length - 1];
-    if (top.kind === 'excuse' && excuseSlot === null) return true;
-    if (findFoundation(top, foundations, merged) !== -1) return true;
-  }
-  return false;
-}
+// Generate all valid moves from a solver state, returns [action description, resulting state]
+function solverMoves(st: SolverState): { move: HintMove; state: SolverState }[] {
+  const results: { move: HintMove; state: SolverState }[] = [];
 
-// Check if a move reveals a face-down card (= "productive")
-function revealsCard(columns: Card[][], fromCol: number, cardIdx: number): boolean {
-  if (cardIdx === 0) return false;
-  return !columns[fromCol][cardIdx - 1].faceUp;
-}
-
-// Find a 2-move sequence that unblocks (leads to a foundation placement or reveals cards)
-function findTwoMoveHint(gs: GameState): [HintMove, HintMove] | null {
-  const cols = gs.columns;
-
-  // Gather all possible first moves
-  type Move = { fromCol: number; cardIdx: number; toCol: number };
-  const allMoves: Move[] = [];
   for (let fc = 0; fc < 11; fc++) {
-    if (cols[fc].length === 0) continue;
-    const ss = seqStart(cols[fc]);
+    const col = st.columns[fc];
+    if (col.length === 0) continue;
+    const ss = seqStart(col);
+
+    // Column-to-column moves
     for (let tc = 0; tc < 11; tc++) {
       if (fc === tc) continue;
-      if (canPlaceOnColumn(cols[fc][ss], cols[tc])) {
-        allMoves.push({ fromCol: fc, cardIdx: ss, toCol: tc });
+      if (!canPlaceOnColumn(col[ss], st.columns[tc])) continue;
+      const ns = cloneSolver(st);
+      const moved = ns.columns[fc].splice(ss);
+      ns.columns[tc].push(...moved);
+      if (ns.columns[fc].length > 0 && !ns.columns[fc][ns.columns[fc].length - 1].faceUp) {
+        ns.columns[fc][ns.columns[fc].length - 1] = { ...ns.columns[fc][ns.columns[fc].length - 1], faceUp: true };
+      }
+      results.push({ move: { fromCol: fc, fromCardIndex: ss, toCol: tc }, state: ns });
+    }
+
+    // Top card to foundation
+    const top = col[col.length - 1];
+    if (top.kind === 'excuse' && !st.excuseSlot) {
+      const ns = cloneSolver(st);
+      ns.columns[fc].pop();
+      if (ns.columns[fc].length > 0 && !ns.columns[fc][ns.columns[fc].length - 1].faceUp) {
+        ns.columns[fc][ns.columns[fc].length - 1] = { ...ns.columns[fc][ns.columns[fc].length - 1], faceUp: true };
+      }
+      ns.excuseSlot = top;
+      // toCol = -1 signals "to excuse slot"
+      results.push({ move: { fromCol: fc, fromCardIndex: col.length - 1, toCol: -1 }, state: ns });
+    }
+    const fi = findFoundation(top, st.foundations, st.trumpsMerged);
+    if (fi !== -1) {
+      const ns = cloneSolver(st);
+      ns.columns[fc].pop();
+      if (ns.columns[fc].length > 0 && !ns.columns[fc][ns.columns[fc].length - 1].faceUp) {
+        ns.columns[fc][ns.columns[fc].length - 1] = { ...ns.columns[fc][ns.columns[fc].length - 1], faceUp: true };
+      }
+      ns.foundations[fi] = [...ns.foundations[fi], top];
+      // toCol = -2 - fi signals "to foundation fi"
+      results.push({ move: { fromCol: fc, fromCardIndex: col.length - 1, toCol: -2 - fi }, state: ns });
+    }
+  }
+
+  return results;
+}
+
+// Find the best 2-move sequence using BFS with scoring
+function findTwoMoveHint(gs: GameState): [HintMove, HintMove] | null {
+  const initial: SolverState = {
+    columns: gs.columns.map(c => [...c]),
+    foundations: gs.foundations.map(f => [...f]),
+    excuseSlot: gs.excuseSlot,
+    trumpsMerged: gs.trumpsMerged,
+  };
+  const baseScore = scoreSolver(initial);
+
+  let best: { moves: [HintMove, HintMove]; score: number } | null = null;
+
+  // Depth 1
+  const moves1 = solverMoves(initial);
+  for (const m1 of moves1) {
+    // Depth 2
+    const moves2 = solverMoves(m1.state);
+    for (const m2 of moves2) {
+      const s2 = scoreSolver(m2.state);
+      if (s2 > baseScore && (!best || s2 > best.score)) {
+        best = { moves: [m1.move, m2.move], score: s2 };
+      }
+      // Depth 3: check if any third move leads to even higher score
+      // (we still only execute 2 moves but pick the pair that enables the best 3rd)
+      const moves3 = solverMoves(m2.state);
+      for (const m3 of moves3) {
+        const s3 = scoreSolver(m3.state);
+        if (s3 > baseScore + 5 && (!best || s3 > best.score + 3)) {
+          // Bonus: this 2-move pair sets up a great 3rd move
+          best = { moves: [m1.move, m2.move], score: s3 };
+        }
       }
     }
   }
 
-  // Try each pair of moves — prefer pairs that lead to a foundation move
-  let bestPair: [HintMove, HintMove] | null = null;
-
-  for (const m1 of allMoves) {
-    const cols1 = simulateColMove(cols, m1.fromCol, m1.cardIdx, m1.toCol);
-    if (!cols1) continue;
-
-    // Check if after first move we already have a foundation move
-    if (hasFoundationMove(cols1, gs.foundations, gs.trumpsMerged, gs.excuseSlot)) {
-      // Find a second move that is also useful, or just return with a dummy second
-      for (const m2 of allMoves) {
-        if (m2.fromCol === m1.fromCol && m2.toCol === m1.toCol) continue;
-        // Recalc seq start for the new state
-        const src2 = cols1[m2.fromCol];
-        if (src2.length === 0) continue;
-        const ss2 = seqStart(src2);
-        if (canPlaceOnColumn(src2[ss2], cols1[m2.toCol])) {
-          const cols2 = simulateColMove(cols1, m2.fromCol, ss2, m2.toCol);
-          if (cols2 && hasFoundationMove(cols2, gs.foundations, gs.trumpsMerged, gs.excuseSlot)) {
-            return [
-              { fromCol: m1.fromCol, fromCardIndex: m1.cardIdx, toCol: m1.toCol },
-              { fromCol: m2.fromCol, fromCardIndex: ss2, toCol: m2.toCol },
-            ];
-          }
-        }
-      }
-      // Even with no good second, first move alone unblocks
-      // Find any valid second move
-      for (let fc = 0; fc < 11; fc++) {
-        if (cols1[fc].length === 0) continue;
-        const ss2 = seqStart(cols1[fc]);
-        for (let tc = 0; tc < 11; tc++) {
-          if (fc === tc) continue;
-          if (canPlaceOnColumn(cols1[fc][ss2], cols1[tc])) {
-            return [
-              { fromCol: m1.fromCol, fromCardIndex: m1.cardIdx, toCol: m1.toCol },
-              { fromCol: fc, fromCardIndex: ss2, toCol: tc },
-            ];
-          }
-        }
-      }
-    }
-
-    // Try second moves that reveal cards or lead to foundation
-    for (let fc2 = 0; fc2 < 11; fc2++) {
-      if (cols1[fc2].length === 0) continue;
-      const ss2 = seqStart(cols1[fc2]);
-      for (let tc2 = 0; tc2 < 11; tc2++) {
-        if (fc2 === tc2) continue;
-        const cols2 = simulateColMove(cols1, fc2, ss2, tc2);
-        if (!cols2) continue;
-        if (hasFoundationMove(cols2, gs.foundations, gs.trumpsMerged, gs.excuseSlot)) {
-          return [
-            { fromCol: m1.fromCol, fromCardIndex: m1.cardIdx, toCol: m1.toCol },
-            { fromCol: fc2, fromCardIndex: ss2, toCol: tc2 },
-          ];
-        }
-        if (!bestPair && (revealsCard(cols1, fc2, ss2) || revealsCard(cols, m1.fromCol, m1.cardIdx))) {
-          bestPair = [
-            { fromCol: m1.fromCol, fromCardIndex: m1.cardIdx, toCol: m1.toCol },
-            { fromCol: fc2, fromCardIndex: ss2, toCol: tc2 },
-          ];
-        }
-      }
-    }
-  }
-
-  return bestPair;
+  return best?.moves ?? null;
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -696,12 +720,14 @@ const FDN_CONFIG: { emptyLabel: string; color: string }[] = [
   { emptyLabel: '21↓', color: 'rgba(251,191,36,0.3)' },
 ];
 
-function FoundationSlot({ fdn, fi, onClick, landing, dirLabel }: {
+function FoundationSlot({ fdn, fi, onClick, landing, dirLabel, selected, onPointerDown }: {
   fdn: Card[];
   fi: number;
   onClick: () => void;
   landing?: boolean;
   dirLabel?: string;
+  selected?: boolean;
+  onPointerDown?: (e: React.PointerEvent) => void;
 }) {
   const cfg = FDN_CONFIG[fi];
 
@@ -724,7 +750,7 @@ function FoundationSlot({ fdn, fi, onClick, landing, dirLabel }: {
         borderRadius: 'var(--card-r)',
       }}
     >
-      <CardFace card={topCard} landing={landing} />
+      <CardFace card={topCard} selected={selected} landing={landing} onPointerDown={onPointerDown} />
       <div
         className="absolute flex items-center justify-center"
         style={{
@@ -1484,7 +1510,12 @@ export default function Page() {
               <FoundationSlot
                 fdn={gs.foundations[fi]} fi={fi} onClick={() => {}}
                 landing={lm?.type === 'fdn' && lm.index === fi}
-
+                selected={gs.selected?.from === 'fdn' && gs.selected.index === fi && !drag?.dragging}
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  const f = gs.foundations[fi];
+                  if (f.length > 0) handleDragStart({ from: 'fdn', index: fi }, [f[f.length - 1]], e);
+                }}
               />
             </div>
           ))}
@@ -1495,6 +1526,12 @@ export default function Page() {
               fdn={gs.foundations[4]} fi={4} onClick={() => {}}
               landing={lm?.type === 'fdn' && lm.index === 4}
               dirLabel={gs.trumpsMerged ? '✓' : '↑'}
+              selected={gs.selected?.from === 'fdn' && gs.selected.index === 4 && !drag?.dragging}
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                const f = gs.foundations[4];
+                if (f.length > 0) handleDragStart({ from: 'fdn', index: 4 }, [f[f.length - 1]], e);
+              }}
             />
           </div>
 
@@ -1522,7 +1559,12 @@ export default function Page() {
                 fdn={gs.foundations[5]} fi={5} onClick={() => {}}
                 landing={lm?.type === 'fdn' && lm.index === 5}
                 dirLabel="↓"
-
+                selected={gs.selected?.from === 'fdn' && gs.selected.index === 5 && !drag?.dragging}
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  const f = gs.foundations[5];
+                  if (f.length > 0) handleDragStart({ from: 'fdn', index: 5 }, [f[f.length - 1]], e);
+                }}
               />
             </div>
           )}
