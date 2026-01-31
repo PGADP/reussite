@@ -158,8 +158,8 @@ function newGameState(): GameState {
 // ═══════════════════════════════════════════════════════════════════
 
 function canPlaceOnColumn(card: Card, col: Card[]): boolean {
-  if (card.kind === 'excuse') return true;
-  if (col.length === 0) return true;
+  if (card.kind === 'excuse') return col.length > 0;
+  if (col.length === 0) return card.kind === 'suit' && card.value === 14;
   const top = col[col.length - 1];
   if (top.kind === 'excuse') return true;
   if (card.kind === 'trump') {
@@ -320,7 +320,7 @@ function SparkleOverlay() {
 // Card sub-components
 // ═══════════════════════════════════════════════════════════════════
 
-function CardFace({ card, selected, landing, appearing, appearDelay, onClick, onDoubleClick, onTouchStart, onTouchEnd }: {
+function CardFace({ card, selected, landing, appearing, appearDelay, onClick, onDoubleClick, onTouchStart, onTouchEnd, onPointerDown, onPointerMove, onPointerUp }: {
   card: Card;
   selected?: boolean;
   landing?: boolean;
@@ -330,6 +330,9 @@ function CardFace({ card, selected, landing, appearing, appearDelay, onClick, on
   onDoubleClick?: (e: React.MouseEvent) => void;
   onTouchStart?: (e: React.TouchEvent) => void;
   onTouchEnd?: (e: React.TouchEvent) => void;
+  onPointerDown?: (e: React.PointerEvent) => void;
+  onPointerMove?: (e: React.PointerEvent) => void;
+  onPointerUp?: (e: React.PointerEvent) => void;
 }) {
   const color = textColor(card);
   const bg = cardBg(card, !!selected);
@@ -352,6 +355,9 @@ function CardFace({ card, selected, landing, appearing, appearDelay, onClick, on
       onDoubleClick={onDoubleClick}
       onTouchStart={onTouchStart}
       onTouchEnd={onTouchEnd}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
       className="cursor-pointer select-none"
       style={{
         width: 'var(--card-w)', height: 'var(--card-h)',
@@ -575,6 +581,22 @@ export default function Page() {
   // Touch drag state for card selection
   const touchStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
 
+  // Drag-and-drop state
+  interface DragState {
+    from: SelectedSource;
+    cards: Card[];
+    startX: number;
+    startY: number;
+    currentX: number;
+    currentY: number;
+    offsetX: number;
+    offsetY: number;
+    dragging: boolean; // true once moved past threshold
+  }
+  const [drag, setDrag] = useState<DragState | null>(null);
+  const dragRef = useRef<DragState | null>(null);
+  const boardRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     setGs(newGameState());
     setMounted(true);
@@ -759,6 +781,8 @@ export default function Page() {
 
   const handleTouchEnd = useCallback((ci: number, cardIdx: number, isLast: boolean, e: React.TouchEvent) => {
     if (!touchStartRef.current) return;
+    // If we were dragging, don't process as swipe
+    if (dragRef.current?.dragging) return;
     const touch = e.changedTouches[0];
     const dx = touch.clientX - touchStartRef.current.x;
     const dy = touch.clientY - touchStartRef.current.y;
@@ -772,6 +796,140 @@ export default function Page() {
       return;
     }
   }, [autoPlace]);
+
+  // ─── Drag-and-drop handlers ────────────────────────────────────
+  const DRAG_THRESHOLD = 6;
+
+  const handleDragStart = useCallback((
+    source: SelectedSource,
+    cards: Card[],
+    e: React.PointerEvent
+  ) => {
+    if (!gs || gs.gameOver) return;
+    // Only left mouse / touch
+    if (e.button !== 0) return;
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const state: DragState = {
+      from: source,
+      cards,
+      startX: e.clientX,
+      startY: e.clientY,
+      currentX: e.clientX,
+      currentY: e.clientY,
+      offsetX: e.clientX - rect.left,
+      offsetY: e.clientY - rect.top,
+      dragging: false,
+    };
+    dragRef.current = state;
+    setDrag(state);
+    e.preventDefault();
+  }, [gs]);
+
+  const handleDragMove = useCallback((e: React.PointerEvent) => {
+    if (!dragRef.current) return;
+    const d = dragRef.current;
+    const dx = e.clientX - d.startX;
+    const dy = e.clientY - d.startY;
+    if (!d.dragging && Math.abs(dx) + Math.abs(dy) < DRAG_THRESHOLD) return;
+    d.dragging = true;
+    d.currentX = e.clientX;
+    d.currentY = e.clientY;
+    dragRef.current = { ...d };
+    setDrag({ ...d });
+    e.preventDefault();
+  }, []);
+
+  const dropOnTarget = useCallback((x: number, y: number) => {
+    if (!gs) return;
+    // Hide drag overlay temporarily to find element underneath
+    const overlay = document.getElementById('drag-overlay');
+    if (overlay) overlay.style.pointerEvents = 'none';
+    // Also hide the drag ghost
+    const ghost = document.getElementById('drag-ghost');
+    if (ghost) ghost.style.display = 'none';
+    const el = document.elementFromPoint(x, y);
+    if (overlay) overlay.style.pointerEvents = '';
+    if (ghost) ghost.style.display = '';
+    if (!el) return;
+    // Walk up to find drop target
+    let target: HTMLElement | null = el as HTMLElement;
+    while (target && !target.dataset.dropTarget) {
+      target = target.parentElement;
+    }
+    if (!target) return;
+    const dt = target.dataset.dropTarget!;
+    if (dt.startsWith('col-')) {
+      const ci = parseInt(dt.slice(4));
+      // Try place on column
+      const d = dragRef.current!;
+      setGs(prev => {
+        if (!prev) return prev;
+        const s = cloneGs(prev);
+        s.selected = d.from;
+        const card = getSelectedCard(s);
+        if (card && canPlaceOnColumn(card, s.columns[ci])) {
+          const moved = removeSelectedCards(s);
+          s.columns[ci].push(...moved);
+          s.selected = null; s.moves++;
+          s.lastMove = { type: 'col', index: ci };
+          return s;
+        }
+        s.selected = null;
+        return s;
+      });
+    } else if (dt.startsWith('fdn-')) {
+      const fi = parseInt(dt.slice(4));
+      const d = dragRef.current!;
+      setGs(prev => {
+        if (!prev) return prev;
+        const s = cloneGs(prev);
+        s.selected = d.from;
+        const card = getSelectedCard(s);
+        const isSubSeq = s.selected?.from === 'col' && s.selected.cardIndex < s.columns[s.selected.index].length - 1;
+        if (!card || isSubSeq || !canPlaceOnFoundation(card, fi, s.foundations, s.trumpsMerged)) {
+          s.selected = null; return s;
+        }
+        removeSelectedCards(s);
+        s.foundations[fi].push(card);
+        s.selected = null; s.moves++;
+        s.lastMove = { type: 'fdn', index: fi };
+        if (isWin(s)) s.gameOver = true;
+        return s;
+      });
+    } else if (dt === 'excuse') {
+      const d = dragRef.current!;
+      setGs(prev => {
+        if (!prev) return prev;
+        const s = cloneGs(prev);
+        s.selected = d.from;
+        const card = getSelectedCard(s);
+        if (card && card.kind === 'excuse' && s.excuseSlot === null) {
+          removeSelectedCards(s);
+          card.faceUp = true;
+          s.excuseSlot = card;
+          s.selected = null; s.moves++;
+          s.lastMove = { type: 'excuse' };
+          return s;
+        }
+        s.selected = null; return s;
+      });
+    }
+  }, [gs]);
+
+  const wasDraggingRef = useRef(false);
+  const handleDragEnd = useCallback((e: React.PointerEvent) => {
+    const d = dragRef.current;
+    if (!d) return;
+    if (d.dragging) {
+      dropOnTarget(e.clientX, e.clientY);
+      wasDraggingRef.current = true;
+      // Reset after a tick so the click event is suppressed
+      setTimeout(() => { wasDraggingRef.current = false; }, 0);
+    }
+    // If not dragging (just a click), let the click handler handle it
+    dragRef.current = null;
+    setDrag(null);
+  }, [dropOnTarget]);
 
   // ═══════════════════════════════════════════════════════════════
   // Render
@@ -799,11 +957,14 @@ export default function Page() {
 
   return (
     <div
+      id="drag-overlay"
       className="min-h-screen select-none flex flex-col"
-      style={{ background: 'var(--bg-felt)' }}
+      style={{ background: 'var(--bg-felt)', touchAction: drag ? 'none' : 'manipulation' }}
       onClick={() => {
-        if (gs.selected !== null) setGs(prev => prev ? ({ ...cloneGs(prev), selected: null, lastMove: null }) : prev);
+        if (gs.selected !== null && !dragRef.current?.dragging) setGs(prev => prev ? ({ ...cloneGs(prev), selected: null, lastMove: null }) : prev);
       }}
+      onPointerMove={handleDragMove}
+      onPointerUp={handleDragEnd}
     >
       <div className="mx-auto px-1 py-1 sm:px-3 sm:py-2 md:px-4 flex flex-col flex-1 w-full"
         style={{ maxWidth: '960px' }} onClick={e => e.stopPropagation()}>
@@ -855,12 +1016,12 @@ export default function Page() {
         </div>
 
         {/* ─── Columns (main area) ─────────────────────── */}
-        <div style={{
+        <div ref={boardRef} style={{
           display: 'grid', gridTemplateColumns: 'repeat(11, 1fr)', gap: '1px',
-          flex: 1,
         }}>
           {gs.columns.map((col, ci) => (
             <div key={ci} className="relative" style={{ minHeight: colHeight(col) }}
+              data-drop-target={`col-${ci}`}
               onClick={(e) => { e.stopPropagation(); clickColumn(ci); }}>
               {col.length === 0 ? (
                 <EmptySlot label="" onClick={() => {}} />
@@ -870,20 +1031,37 @@ export default function Page() {
                   const isInSelection = gs.selected?.from === 'col'
                     && gs.selected.index === ci
                     && idx >= gs.selected.cardIndex;
+                  const isDragSource = drag?.dragging && drag.from.from === 'col'
+                    && drag.from.index === ci && idx >= drag.from.cardIndex;
                   return (
                     <div key={card.id} className="absolute left-0"
-                      style={{ top: cardTopCss(col, idx), zIndex: idx, width: 'var(--card-w)' }}>
+                      style={{
+                        top: cardTopCss(col, idx), zIndex: idx, width: 'var(--card-w)',
+                        opacity: isDragSource ? 0.3 : 1,
+                      }}>
                       {card.faceUp ? (
                         <CardFace
                           card={card}
-                          selected={isInSelection}
+                          selected={isInSelection && !drag?.dragging}
                           landing={isLast && lm?.type === 'col' && lm.index === ci}
                           appearing={isLast && lm?.type === 'distribute'}
                           appearDelay={ci}
-                          onClick={(e) => { e.stopPropagation(); clickCard(ci, idx); }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (wasDraggingRef.current || dragRef.current?.dragging) return;
+                            clickCard(ci, idx);
+                          }}
                           onDoubleClick={(e) => { e.stopPropagation(); if (isLast) autoPlace(ci); }}
                           onTouchStart={handleTouchStart}
                           onTouchEnd={(e) => handleTouchEnd(ci, idx, isLast, e)}
+                          onPointerDown={(e) => {
+                            e.stopPropagation();
+                            const cards = col.slice(idx);
+                            handleDragStart(
+                              { from: 'col', index: ci, cardIndex: idx },
+                              cards, e
+                            );
+                          }}
                         />
                       ) : (
                         <CardBack />
@@ -923,16 +1101,27 @@ export default function Page() {
           </div>
 
           {/* Excuse storage slot */}
-          <div onClick={(e) => { e.stopPropagation(); clickExcuseSlot(); }}>
+          <div data-drop-target="excuse" onClick={(e) => {
+            e.stopPropagation();
+            if (wasDraggingRef.current) return;
+            clickExcuseSlot();
+          }}>
             {gs.excuseSlot ? (
               <div className="relative cursor-pointer" style={{
                 animation: lm?.type === 'excuse' ? 'fdn-glow 0.6s ease-out' : undefined,
                 borderRadius: 'var(--card-r)',
+                opacity: drag?.dragging && drag.from.from === 'excuse' ? 0.3 : 1,
               }}>
                 <CardFace
                   card={gs.excuseSlot}
-                  selected={gs.selected?.from === 'excuse'}
+                  selected={gs.selected?.from === 'excuse' && !drag?.dragging}
                   landing={lm?.type === 'excuse'}
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    if (gs.excuseSlot) {
+                      handleDragStart({ from: 'excuse' }, [gs.excuseSlot], e);
+                    }
+                  }}
                 />
               </div>
             ) : (
@@ -958,7 +1147,7 @@ export default function Page() {
 
           {/* 4 Suit foundations */}
           {[0, 1, 2, 3].map(fi => (
-            <div key={fi} onClick={(e) => { e.stopPropagation(); clickFoundation(fi); }}>
+            <div key={fi} data-drop-target={`fdn-${fi}`} onClick={(e) => { e.stopPropagation(); clickFoundation(fi); }}>
               <FoundationSlot
                 fdn={gs.foundations[fi]} fi={fi} onClick={() => {}}
                 landing={lm?.type === 'fdn' && lm.index === fi}
@@ -968,7 +1157,7 @@ export default function Page() {
           ))}
 
           {/* Trump ascending [4] */}
-          <div onClick={(e) => { e.stopPropagation(); clickFoundation(4); }}>
+          <div data-drop-target="fdn-4" onClick={(e) => { e.stopPropagation(); clickFoundation(4); }}>
             <FoundationSlot
               fdn={gs.foundations[4]} fi={4} onClick={() => {}}
               landing={lm?.type === 'fdn' && lm.index === 4}
@@ -995,7 +1184,7 @@ export default function Page() {
 
           {/* Trump descending [5] */}
           {!gs.trumpsMerged && (
-            <div onClick={(e) => { e.stopPropagation(); clickFoundation(5); }}>
+            <div data-drop-target="fdn-5" onClick={(e) => { e.stopPropagation(); clickFoundation(5); }}>
               <FoundationSlot
                 fdn={gs.foundations[5]} fi={5} onClick={() => {}}
                 landing={lm?.type === 'fdn' && lm.index === 5}
@@ -1005,6 +1194,34 @@ export default function Page() {
             </div>
           )}
         </div>
+
+        {/* ─── Drag ghost overlay ──────────────────────── */}
+        {drag?.dragging && (
+          <div id="drag-ghost" style={{
+            position: 'fixed', left: 0, top: 0, width: '100%', height: '100%',
+            pointerEvents: 'none', zIndex: 1000,
+          }}>
+            <div style={{
+              position: 'absolute',
+              left: drag.currentX - drag.offsetX,
+              top: drag.currentY - drag.offsetY,
+              opacity: 0.9,
+              transform: 'rotate(2deg) scale(1.05)',
+              filter: 'drop-shadow(0 8px 16px rgba(0,0,0,0.5))',
+            }}>
+              {drag.cards.map((card, i) => (
+                <div key={card.id} style={{
+                  position: i === 0 ? 'relative' : 'absolute',
+                  top: i === 0 ? 0 : `calc(${i} * var(--peek-up))`,
+                  left: 0,
+                  zIndex: i,
+                }}>
+                  <CardFace card={card} />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* ─── Victory ─────────────────────────────────── */}
         {gs.gameOver && (
