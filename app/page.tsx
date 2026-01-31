@@ -18,7 +18,8 @@ interface Card {
 
 type SelectedSource =
   | { from: 'col'; index: number; cardIndex: number }
-  | { from: 'excuse' };
+  | { from: 'excuse' }
+  | { from: 'fdn'; index: number };
 
 type LastMove =
   | { type: 'col'; index: number }
@@ -423,6 +424,10 @@ function revealBottom(col: Card[]) {
 function getSelectedCard(gs: GameState): Card | null {
   if (!gs.selected) return null;
   if (gs.selected.from === 'excuse') return gs.excuseSlot;
+  if (gs.selected.from === 'fdn') {
+    const fdn = gs.foundations[gs.selected.index];
+    return fdn.length > 0 ? fdn[fdn.length - 1] : null;
+  }
   const col = gs.columns[gs.selected.index];
   const ci = gs.selected.cardIndex;
   return ci < col.length ? col[ci] : null;
@@ -433,6 +438,11 @@ function removeSelectedCards(gs: GameState): Card[] {
   if (gs.selected.from === 'excuse') {
     const card = gs.excuseSlot;
     gs.excuseSlot = null;
+    return card ? [card] : [];
+  }
+  if (gs.selected.from === 'fdn') {
+    const fdn = gs.foundations[gs.selected.index];
+    const card = fdn.pop();
     return card ? [card] : [];
   }
   const col = gs.columns[gs.selected.index];
@@ -883,8 +893,23 @@ export default function Page() {
 
   const clickFoundation = useCallback((fi: number) => {
     setGs(prev => {
-      if (!prev || prev.gameOver || prev.selected === null) return prev;
+      if (!prev || prev.gameOver) return prev;
       const s = cloneGs(prev);
+
+      // No selection: select the top card of this foundation
+      if (s.selected === null) {
+        if (s.foundations[fi].length === 0) return prev;
+        s.selected = { from: 'fdn', index: fi };
+        s.lastMove = null;
+        return s;
+      }
+
+      // Toggle: clicking the same foundation deselects
+      if (s.selected.from === 'fdn' && s.selected.index === fi) {
+        s.selected = null; s.lastMove = null; return s;
+      }
+
+      // Try to place selected card on this foundation
       const card = getSelectedCard(s);
       const isSubSeq = s.selected?.from === 'col' && s.selected.cardIndex < s.columns[s.selected.index].length - 1;
       if (!card || isSubSeq || !canPlaceOnFoundation(card, fi, s.foundations, s.trumpsMerged)) {
@@ -958,6 +983,121 @@ export default function Page() {
       s.selected = null; s.moves++;
       s.lastMove = { type: 'fdn', index: fi };
       if (isWin(s)) s.gameOver = true;
+      return s;
+    });
+  }, []);
+
+  // ─── Cheat: Hint (2-move solution) ──────────────────────────────
+  const activateHintCheat = useCallback(() => {
+    setGs(prev => {
+      if (!prev || prev.gameOver || prev.cheat.hintUsed) return prev;
+      const hint = findTwoMoveHint(prev);
+      if (!hint) return prev; // no solution found
+      const s = cloneGs(prev);
+      s.cheat.hintUsed = true;
+      s.cheat.activeCheat = 'hint';
+      s.cheat.hintMoves = hint;
+      s.cheat.hintStep = 0;
+      s.selected = null;
+      return s;
+    });
+  }, []);
+
+  // After animation ends, apply the hint moves automatically
+  useEffect(() => {
+    if (!gs?.cheat.activeCheat) return;
+    if (gs.cheat.activeCheat === 'hint') {
+      const t = setTimeout(() => {
+        setGs(prev => {
+          if (!prev) return prev;
+          const s = cloneGs(prev);
+          s.cheat.activeCheat = null;
+          // Execute both hint moves
+          if (s.cheat.hintMoves) {
+            const [m1, m2] = s.cheat.hintMoves;
+            // Move 1
+            const src1 = s.columns[m1.fromCol];
+            const moved1 = src1.splice(m1.fromCardIndex);
+            s.columns[m1.toCol].push(...moved1);
+            revealBottom(s.columns[m1.fromCol]);
+            s.moves++;
+            // Move 2
+            const ss2 = seqStart(s.columns[m2.fromCol]);
+            const src2 = s.columns[m2.fromCol];
+            const moved2 = src2.splice(ss2);
+            s.columns[m2.toCol].push(...moved2);
+            revealBottom(s.columns[m2.fromCol]);
+            s.moves++;
+            s.lastMove = { type: 'col', index: m2.toCol };
+          }
+          s.cheat.hintMoves = null;
+          return s;
+        });
+      }, 1800);
+      return () => clearTimeout(t);
+    }
+    if (gs.cheat.activeCheat === 'slowDist') {
+      const t = setTimeout(() => {
+        setGs(prev => {
+          if (!prev) return prev;
+          const s = cloneGs(prev);
+          s.cheat.activeCheat = null;
+          // Enter slow distribution mode
+          const eligible: number[] = [];
+          for (let i = 0; i < 11; i++) {
+            if (!hasVisibleKing(s.columns[i])) {
+              eligible.push(i);
+            }
+          }
+          s.cheat.slowDistMode = true;
+          s.cheat.slowDistEligible = eligible;
+          s.selected = null;
+          return s;
+        });
+      }, 1800);
+      return () => clearTimeout(t);
+    }
+  }, [gs?.cheat.activeCheat]);
+
+  // ─── Cheat: Slow Distribution (card-by-card) ──────────────────
+  const activateSlowDistCheat = useCallback(() => {
+    setGs(prev => {
+      if (!prev || prev.gameOver || prev.cheat.slowDistUsed || prev.stock.length === 0) return prev;
+      const s = cloneGs(prev);
+      s.cheat.slowDistUsed = true;
+      s.cheat.activeCheat = 'slowDist';
+      s.selected = null;
+      return s;
+    });
+  }, []);
+
+  const slowDistNext = useCallback(() => {
+    setGs(prev => {
+      if (!prev || !prev.cheat.slowDistMode || prev.stock.length === 0) return prev;
+      const s = cloneGs(prev);
+      if (s.cheat.slowDistEligible.length === 0) {
+        // No more eligible columns, end
+        s.cheat.slowDistMode = false;
+        return s;
+      }
+      const colIdx = s.cheat.slowDistEligible.shift()!;
+      const card = s.stock.pop()!;
+      card.faceUp = true;
+      s.columns[colIdx].push(card);
+      s.lastMove = { type: 'col', index: colIdx };
+      if (s.stock.length === 0 || s.cheat.slowDistEligible.length === 0) {
+        s.cheat.slowDistMode = false;
+      }
+      return s;
+    });
+  }, []);
+
+  const slowDistStop = useCallback(() => {
+    setGs(prev => {
+      if (!prev) return prev;
+      const s = cloneGs(prev);
+      s.cheat.slowDistMode = false;
+      s.cheat.slowDistEligible = [];
       return s;
     });
   }, []);
@@ -1387,6 +1527,130 @@ export default function Page() {
             </div>
           )}
         </div>
+
+        {/* ─── Slow distribution bar ──────────────────── */}
+        {gs.cheat.slowDistMode && (
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            gap: '8px', marginTop: '4px', paddingBottom: '4px',
+          }}>
+            <button
+              onClick={(e) => { e.stopPropagation(); slowDistNext(); }}
+              style={{
+                fontSize: 'clamp(9px, 1.8vw, 14px)', padding: '6px 16px',
+                background: 'linear-gradient(135deg, #2563eb, #1d4ed8)',
+                color: '#fff', border: '1px solid #3b82f6',
+                borderRadius: '8px', cursor: 'pointer',
+                fontFamily: "'SF Pro Display', -apple-system, sans-serif",
+                fontWeight: 700, animation: 'slow-dist-pulse 1.5s ease-in-out infinite',
+              }}
+            >Carte suivante ({gs.cheat.slowDistEligible.length})</button>
+            <button
+              onClick={(e) => { e.stopPropagation(); slowDistStop(); }}
+              style={{
+                fontSize: 'clamp(9px, 1.8vw, 14px)', padding: '6px 12px',
+                background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.6)',
+                border: '1px solid rgba(255,255,255,0.15)',
+                borderRadius: '8px', cursor: 'pointer',
+                fontFamily: "'SF Pro Display', -apple-system, sans-serif",
+                fontWeight: 600,
+              }}
+            >Stop</button>
+          </div>
+        )}
+
+        {/* ─── Cheat buttons ──────────────────────────── */}
+        {!gs.gameOver && !gs.cheat.slowDistMode && !gs.cheat.activeCheat && (
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            gap: '6px', marginTop: '2px', paddingBottom: '2px',
+          }}>
+            <button
+              onClick={(e) => { e.stopPropagation(); activateHintCheat(); }}
+              disabled={gs.cheat.hintUsed}
+              style={{
+                fontSize: 'clamp(7px, 1.4vw, 11px)', padding: '3px 8px',
+                background: gs.cheat.hintUsed
+                  ? 'rgba(255,255,255,0.03)'
+                  : 'linear-gradient(135deg, #7c3aed, #6d28d9)',
+                color: gs.cheat.hintUsed ? 'rgba(255,255,255,0.2)' : '#e9d5ff',
+                border: gs.cheat.hintUsed
+                  ? '1px solid rgba(255,255,255,0.05)'
+                  : '1px solid #8b5cf6',
+                borderRadius: '6px',
+                cursor: gs.cheat.hintUsed ? 'default' : 'pointer',
+                fontFamily: "'SF Pro Display', -apple-system, sans-serif",
+                fontWeight: 600, opacity: gs.cheat.hintUsed ? 0.5 : 1,
+              }}
+            >{gs.cheat.hintUsed ? 'Triche 1 ✗' : 'Triche : Indice'}</button>
+            <button
+              onClick={(e) => { e.stopPropagation(); activateSlowDistCheat(); }}
+              disabled={gs.cheat.slowDistUsed || gs.stock.length === 0}
+              style={{
+                fontSize: 'clamp(7px, 1.4vw, 11px)', padding: '3px 8px',
+                background: gs.cheat.slowDistUsed || gs.stock.length === 0
+                  ? 'rgba(255,255,255,0.03)'
+                  : 'linear-gradient(135deg, #2563eb, #1d4ed8)',
+                color: gs.cheat.slowDistUsed || gs.stock.length === 0 ? 'rgba(255,255,255,0.2)' : '#bfdbfe',
+                border: gs.cheat.slowDistUsed || gs.stock.length === 0
+                  ? '1px solid rgba(255,255,255,0.05)'
+                  : '1px solid #3b82f6',
+                borderRadius: '6px',
+                cursor: gs.cheat.slowDistUsed || gs.stock.length === 0 ? 'default' : 'pointer',
+                fontFamily: "'SF Pro Display', -apple-system, sans-serif",
+                fontWeight: 600,
+                opacity: gs.cheat.slowDistUsed || gs.stock.length === 0 ? 0.5 : 1,
+              }}
+            >{gs.cheat.slowDistUsed ? 'Triche 2 ✗' : 'Triche : Distrib.'}</button>
+          </div>
+        )}
+
+        {/* ─── Cheat fullscreen animation overlay ─────── */}
+        {gs.cheat.activeCheat && (
+          <div
+            className="fixed inset-0 flex items-center justify-center"
+            style={{
+              zIndex: 2000, pointerEvents: 'none',
+              animation: 'cheat-overlay-in 1.8s ease-out forwards',
+              background: gs.cheat.activeCheat === 'hint'
+                ? 'radial-gradient(ellipse at center, rgba(124,58,237,0.4) 0%, rgba(0,0,0,0.8) 70%)'
+                : 'radial-gradient(ellipse at center, rgba(37,99,235,0.4) 0%, rgba(0,0,0,0.8) 70%)',
+            }}
+          >
+            {/* Flash */}
+            <div className="absolute inset-0" style={{
+              background: gs.cheat.activeCheat === 'hint'
+                ? 'rgba(168, 85, 247, 1)'
+                : 'rgba(59, 130, 246, 1)',
+              animation: 'cheat-flash 1.8s ease-out forwards',
+            }} />
+            {/* Skull / Icon */}
+            <div style={{
+              position: 'absolute', top: '38%', left: '50%',
+              fontSize: 'clamp(60px, 15vw, 120px)',
+              animation: 'cheat-skull 1.8s ease-out forwards',
+              filter: 'drop-shadow(0 0 30px rgba(255,255,255,0.3))',
+            }}>
+              {gs.cheat.activeCheat === 'hint' ? '🔮' : '🃏'}
+            </div>
+            {/* Text */}
+            <div style={{
+              position: 'absolute', top: '58%', left: '50%',
+              animation: 'cheat-text 1.8s ease-out forwards',
+              fontFamily: "'SF Pro Display', -apple-system, sans-serif",
+              fontSize: 'clamp(18px, 5vw, 36px)',
+              fontWeight: 900, letterSpacing: '0.1em',
+              textTransform: 'uppercase',
+              color: '#fff',
+              textShadow: gs.cheat.activeCheat === 'hint'
+                ? '0 0 20px rgba(168,85,247,0.8), 0 0 40px rgba(168,85,247,0.4)'
+                : '0 0 20px rgba(59,130,246,0.8), 0 0 40px rgba(59,130,246,0.4)',
+              whiteSpace: 'nowrap',
+            }}>
+              {gs.cheat.activeCheat === 'hint' ? 'TRICHE !' : 'TRICHE !'}
+            </div>
+          </div>
+        )}
 
         {/* ─── Drag ghost overlay ──────────────────────── */}
         {drag?.dragging && (
