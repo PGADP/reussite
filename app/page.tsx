@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 
 // ═══════════════════════════════════════════════════════════════════
 // Types
@@ -81,25 +81,36 @@ const suitSym = (c: Card): string => {
   return SUIT_SYM[c.suit!];
 };
 
-// Card colors: suit=red/black on white, trump=gold on dark, excuse=gold on dark
 const textColor = (c: Card): string => {
   if (c.kind === 'excuse') return '#fbbf24';
-  if (c.kind === 'trump') return '#fbbf24';
+  if (c.kind === 'trump') return '#fcd34d';
   return isRed(c) ? '#dc2626' : '#1e293b';
 };
 
 const cardBg = (c: Card, selected: boolean): string => {
-  if (c.kind === 'trump') return selected ? '#374151' : '#1f2937';
-  if (c.kind === 'excuse') return selected ? '#374151' : '#1f2937';
-  if (selected) return '#fefce8';
-  return '#ffffff';
+  if (selected) {
+    if (c.kind === 'trump') return '#334155';
+    if (c.kind === 'excuse') return '#292524';
+    return '#fefce8';
+  }
+  if (c.kind === 'trump') return '#1e293b';
+  if (c.kind === 'excuse') return '#1c1917';
+  return isRed(c) ? '#ffffff' : '#f8fafc';
 };
 
-const cardBorder = (c: Card, selected: boolean): string => {
-  if (selected) return '2px solid #f59e0b';
-  if (c.kind === 'trump' || c.kind === 'excuse') return '1px solid #4b5563';
-  return '1px solid #e5e7eb';
+const cardBorderColor = (c: Card, selected: boolean): string => {
+  if (selected) return '#f59e0b';
+  if (c.kind === 'trump') return '#475569';
+  if (c.kind === 'excuse') return '#78716c';
+  return isRed(c) ? '#fecaca' : '#cbd5e1';
 };
+
+// Is a King (value 14) face-up on top of column?
+function hasKingOnTop(col: Card[]): boolean {
+  if (col.length === 0) return false;
+  const top = col[col.length - 1];
+  return top.faceUp && top.kind === 'suit' && top.value === 14;
+}
 
 // ═══════════════════════════════════════════════════════════════════
 // Game state
@@ -309,7 +320,7 @@ function SparkleOverlay() {
 // Card sub-components
 // ═══════════════════════════════════════════════════════════════════
 
-function CardFace({ card, selected, landing, appearing, appearDelay, onClick, onDoubleClick }: {
+function CardFace({ card, selected, landing, appearing, appearDelay, onClick, onDoubleClick, onTouchStart, onTouchEnd }: {
   card: Card;
   selected?: boolean;
   landing?: boolean;
@@ -317,13 +328,14 @@ function CardFace({ card, selected, landing, appearing, appearDelay, onClick, on
   appearDelay?: number;
   onClick?: (e: React.MouseEvent) => void;
   onDoubleClick?: (e: React.MouseEvent) => void;
+  onTouchStart?: (e: React.TouchEvent) => void;
+  onTouchEnd?: (e: React.TouchEvent) => void;
 }) {
   const color = textColor(card);
   const bg = cardBg(card, !!selected);
-  const border = cardBorder(card, !!selected);
+  const border = cardBorderColor(card, !!selected);
   const isExcuse = card.kind === 'excuse';
   const isTrump = card.kind === 'trump';
-  const isDark = isTrump || isExcuse;
 
   const animStyle: React.CSSProperties = {};
   if (landing) {
@@ -338,22 +350,24 @@ function CardFace({ card, selected, landing, appearing, appearDelay, onClick, on
     <div
       onClick={onClick}
       onDoubleClick={onDoubleClick}
+      onTouchStart={onTouchStart}
+      onTouchEnd={onTouchEnd}
       className="cursor-pointer select-none"
       style={{
         width: 'var(--card-w)', height: 'var(--card-h)',
         borderRadius: 'var(--card-r)',
         background: bg,
-        border,
+        border: `1.5px solid ${border}`,
         boxShadow: selected
-          ? '0 0 12px rgba(245,158,11,0.5), 0 4px 8px rgba(0,0,0,0.3)'
-          : isDark
-            ? '0 2px 6px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05)'
-            : '0 1px 4px rgba(0,0,0,0.12), inset 0 1px 0 rgba(255,255,255,0.8)',
+          ? '0 0 10px rgba(245,158,11,0.5), 0 4px 8px rgba(0,0,0,0.3)'
+          : isTrump || isExcuse
+            ? '0 2px 6px rgba(0,0,0,0.4)'
+            : '0 1px 4px rgba(0,0,0,0.2)',
         display: 'flex', flexDirection: 'column',
         alignItems: isExcuse ? 'center' : 'flex-start',
         justifyContent: isExcuse ? 'center' : 'flex-start',
         padding: isExcuse ? '0' : 'calc(var(--card-fs) * 0.2)',
-        fontFamily: '-apple-system, "Segoe UI", Roboto, sans-serif',
+        fontFamily: "'SF Pro Display', 'Inter', -apple-system, sans-serif",
         color,
         overflow: 'hidden', position: 'relative',
         transition: 'background 0.15s, border-color 0.15s, box-shadow 0.15s',
@@ -361,125 +375,57 @@ function CardFace({ card, selected, landing, appearing, appearDelay, onClick, on
       }}
     >
       {isExcuse ? (
-        /* ── Excuse: centered "?" with label ── */
-        <div style={{
-          display: 'flex', flexDirection: 'column', alignItems: 'center',
-          gap: '1px',
-        }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
           <div style={{
-            fontSize: 'var(--card-fs-lg)',
-            fontWeight: 900,
-            lineHeight: 1,
-            color: '#fbbf24',
+            fontSize: 'var(--card-fs-lg)', lineHeight: 1, fontWeight: 800,
             textShadow: '0 0 8px rgba(251,191,36,0.4)',
-          }}>
-            ?
-          </div>
+          }}>?</div>
           <div style={{
-            fontSize: 'calc(var(--card-fs) * 0.55)',
-            fontWeight: 600,
-            lineHeight: 1,
-            color: '#9ca3af',
-            letterSpacing: '0.5px',
-            textTransform: 'uppercase',
-          }}>
-            Excuse
-          </div>
+            fontSize: 'calc(var(--card-fs) * 0.55)', fontWeight: 700,
+            lineHeight: 1.2, letterSpacing: '0.05em',
+            textTransform: 'uppercase', opacity: 0.7,
+          }}>Excuse</div>
         </div>
       ) : isTrump ? (
-        /* ── Trump: bold number only, no symbol ── */
         <>
-          {/* Top-left number */}
-          <div style={{
-            fontSize: 'var(--card-fs)',
-            fontWeight: 900,
-            lineHeight: 1,
-            color: '#fbbf24',
-            letterSpacing: '-0.5px',
-          }}>
+          <div style={{ fontSize: 'var(--card-fs)', fontWeight: 900, lineHeight: 1, letterSpacing: '-0.02em' }}>
             {displayVal(card)}
           </div>
-
-          {/* Center: large number watermark */}
           <div style={{
-            position: 'absolute',
-            top: '50%', left: '50%',
+            position: 'absolute', top: '50%', left: '50%',
             transform: 'translate(-50%, -50%)',
-            fontSize: 'var(--card-fs-lg)',
-            fontWeight: 900,
-            lineHeight: 1,
-            color: '#fbbf24',
-            opacity: 0.15,
-          }}>
-            {displayVal(card)}
-          </div>
-
-          {/* Subtle top accent line */}
+            fontSize: 'var(--card-fs-lg)', lineHeight: 1,
+            opacity: 0.15, fontWeight: 900, letterSpacing: '-0.03em',
+          }}>{displayVal(card)}</div>
           <div style={{
-            position: 'absolute',
-            top: 0, left: '15%', right: '15%',
-            height: '2px',
-            background: 'linear-gradient(90deg, transparent, #fbbf24, transparent)',
-            opacity: 0.3,
-            borderRadius: '0 0 2px 2px',
+            position: 'absolute', top: 0, left: '15%', right: '15%', height: '1.5px',
+            background: 'linear-gradient(90deg, transparent, #fbbf24, transparent)', opacity: 0.4,
           }} />
-
-          {/* Bottom-right number (inverted) */}
           <div style={{
-            position: 'absolute',
-            bottom: 'calc(var(--card-fs) * 0.2)',
+            position: 'absolute', bottom: 'calc(var(--card-fs) * 0.2)',
             right: 'calc(var(--card-fs) * 0.25)',
-            fontSize: 'var(--card-fs)',
-            fontWeight: 900,
-            lineHeight: 1,
-            color: '#fbbf24',
-            transform: 'rotate(180deg)',
-            letterSpacing: '-0.5px',
-          }}>
-            {displayVal(card)}
-          </div>
+            fontSize: 'var(--card-fs)', fontWeight: 900, lineHeight: 1, transform: 'rotate(180deg)',
+          }}>{displayVal(card)}</div>
         </>
       ) : (
-        /* ── Suit cards: classic layout ── */
         <>
-          {/* Top-left: value + suit */}
           <div style={{
-            fontSize: 'var(--card-fs)',
-            fontWeight: 800,
-            lineHeight: 1.05,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
+            fontSize: 'var(--card-fs)', fontWeight: 800, lineHeight: 1.05,
+            display: 'flex', flexDirection: 'column', alignItems: 'center',
           }}>
             <span>{displayVal(card)}</span>
             <span style={{ fontSize: 'calc(var(--card-fs) * 0.85)' }}>{suitSym(card)}</span>
           </div>
-
-          {/* Center: large suit symbol */}
           <div style={{
-            position: 'absolute',
-            top: '50%', left: '50%',
+            position: 'absolute', top: '50%', left: '50%',
             transform: 'translate(-50%, -50%)',
-            fontSize: 'var(--card-fs-lg)',
-            lineHeight: 1,
-            opacity: 0.15,
-            fontWeight: 700,
-          }}>
-            {suitSym(card)}
-          </div>
-
-          {/* Bottom-right (inverted) */}
+            fontSize: 'var(--card-fs-lg)', lineHeight: 1, opacity: 0.2, fontWeight: 700,
+          }}>{suitSym(card)}</div>
           <div style={{
-            position: 'absolute',
-            bottom: 'calc(var(--card-fs) * 0.2)',
+            position: 'absolute', bottom: 'calc(var(--card-fs) * 0.2)',
             right: 'calc(var(--card-fs) * 0.2)',
-            fontSize: 'var(--card-fs)',
-            fontWeight: 800,
-            lineHeight: 1.05,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            transform: 'rotate(180deg)',
+            fontSize: 'var(--card-fs)', fontWeight: 800, lineHeight: 1.05,
+            display: 'flex', flexDirection: 'column', alignItems: 'center', transform: 'rotate(180deg)',
           }}>
             <span>{displayVal(card)}</span>
             <span style={{ fontSize: 'calc(var(--card-fs) * 0.85)' }}>{suitSym(card)}</span>
@@ -499,20 +445,18 @@ function CardBack({ onClick }: { onClick?: (e: React.MouseEvent) => void }) {
       style={{
         width: 'var(--card-w)', height: 'var(--card-h)',
         borderRadius: 'var(--card-r)',
-        border: '1px solid #334155',
-        boxShadow: '0 2px 6px rgba(0,0,0,0.3)',
-        background: `linear-gradient(135deg, #1e293b 0%, #334155 50%, #1e293b 100%)`,
+        border: '1.5px solid #334155',
+        boxShadow: '0 1px 4px rgba(0,0,0,0.4)',
+        background: 'linear-gradient(135deg, #1e293b 0%, #334155 50%, #1e293b 100%)',
         cursor: onClick ? 'pointer' : 'default',
-        position: 'relative',
-        overflow: 'hidden',
+        position: 'relative', overflow: 'hidden',
       }}
     >
-      {/* Diamond pattern overlay */}
       <div style={{
         position: 'absolute', inset: '3px',
         borderRadius: 'calc(var(--card-r) - 2px)',
-        border: '1px solid rgba(251,191,36,0.15)',
-        background: `repeating-conic-gradient(rgba(251,191,36,0.04) 0% 25%, transparent 0% 50%) 0 0 / 8px 8px`,
+        border: '1px solid rgba(255,255,255,0.06)',
+        background: `repeating-linear-gradient(45deg,transparent,transparent 4px,rgba(255,255,255,0.03) 4px,rgba(255,255,255,0.03) 5px)`,
       }} />
     </div>
   );
@@ -530,15 +474,14 @@ function EmptySlot({ label, onClick, color }: {
       style={{
         width: 'var(--card-w)', height: 'var(--card-h)',
         borderRadius: 'var(--card-r)',
-        border: `2px dashed ${color ?? 'rgba(255,255,255,0.12)'}`,
+        border: `1.5px dashed ${color ?? 'rgba(255,255,255,0.1)'}`,
         color: color ?? 'rgba(255,255,255,0.2)',
         fontSize: 'var(--card-fs)',
-        fontFamily: '-apple-system, sans-serif',
+        fontFamily: "'SF Pro Display', -apple-system, sans-serif",
         fontWeight: 700,
         cursor: onClick ? 'pointer' : 'default',
-        lineHeight: 1.1,
-        textAlign: 'center',
-        whiteSpace: 'pre-line',
+        lineHeight: 1.1, textAlign: 'center', whiteSpace: 'pre-line',
+        background: 'rgba(255,255,255,0.02)',
       }}
     >
       {label}
@@ -547,12 +490,12 @@ function EmptySlot({ label, onClick, color }: {
 }
 
 const FDN_CONFIG: { emptyLabel: string; color: string }[] = [
-  { emptyLabel: '♥', color: 'rgba(220,38,38,0.25)' },
-  { emptyLabel: '♦', color: 'rgba(220,38,38,0.25)' },
-  { emptyLabel: '♣', color: 'rgba(255,255,255,0.15)' },
-  { emptyLabel: '♠', color: 'rgba(255,255,255,0.15)' },
-  { emptyLabel: '1\n↑', color: 'rgba(251,191,36,0.2)' },
-  { emptyLabel: '21\n↓', color: 'rgba(251,191,36,0.2)' },
+  { emptyLabel: '♥', color: 'rgba(220,38,38,0.35)' },
+  { emptyLabel: '♦', color: 'rgba(220,38,38,0.35)' },
+  { emptyLabel: '♣', color: 'rgba(255,255,255,0.2)' },
+  { emptyLabel: '♠', color: 'rgba(255,255,255,0.2)' },
+  { emptyLabel: '1↑', color: 'rgba(251,191,36,0.3)' },
+  { emptyLabel: '21↓', color: 'rgba(251,191,36,0.3)' },
 ];
 
 function FoundationSlot({ fdn, fi, onClick, landing, dirLabel }: {
@@ -584,20 +527,19 @@ function FoundationSlot({ fdn, fi, onClick, landing, dirLabel }: {
       }}
     >
       <CardFace card={topCard} landing={landing} />
-      {/* Count badge */}
       <div
         className="absolute flex items-center justify-center"
         style={{
           bottom: '-3px', right: '-3px',
-          background: fi >= 4 ? '#92400e' : '#065f46',
-          color: fi >= 4 ? '#fde68a' : '#a7f3d0',
+          background: fi >= 4 ? '#92400e' : '#1e293b',
+          color: fi >= 4 ? '#fcd34d' : '#94a3b8',
           borderRadius: '999px',
           width: 'calc(var(--card-fs) * 1.3)',
           height: 'calc(var(--card-fs) * 1.3)',
           fontSize: 'calc(var(--card-fs) * 0.65)',
           fontWeight: 700,
-          border: fi >= 4 ? '1px solid #b45309' : '1px solid #047857',
-          fontFamily: '-apple-system, sans-serif',
+          border: fi >= 4 ? '1px solid #b45309' : '1px solid #475569',
+          fontFamily: "'SF Pro Display', -apple-system, sans-serif",
         }}
       >
         {fdn.length}
@@ -607,14 +549,12 @@ function FoundationSlot({ fdn, fi, onClick, landing, dirLabel }: {
           className="absolute flex items-center justify-center"
           style={{
             top: '-3px', left: '-3px',
-            background: '#78350f', color: '#fde68a',
+            background: '#92400e', color: '#fcd34d',
             borderRadius: '999px',
             width: 'calc(var(--card-fs) * 1.1)',
             height: 'calc(var(--card-fs) * 1.1)',
             fontSize: 'calc(var(--card-fs) * 0.65)',
-            fontWeight: 700,
-            border: '1px solid #92400e',
-            fontFamily: '-apple-system, sans-serif',
+            fontWeight: 700, border: '1px solid #b45309',
           }}
         >
           {dirLabel}
@@ -632,6 +572,9 @@ export default function Page() {
   const [gs, setGs] = useState<GameState | null>(null);
   const [mounted, setMounted] = useState(false);
 
+  // Touch drag state for card selection
+  const touchStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
+
   useEffect(() => {
     setGs(newGameState());
     setMounted(true);
@@ -648,15 +591,23 @@ export default function Page() {
 
   const restart = useCallback(() => setGs(newGameState()), []);
 
+  // ─── Distribute (skip columns with face-up King on top) ────────
   const distribute = useCallback(() => {
     setGs(prev => {
       if (!prev || prev.gameOver || prev.stock.length === 0) return prev;
       const s = cloneGs(prev);
-      const count = Math.min(s.stock.length, 11);
+      // Find eligible columns (no face-up King on top)
+      const eligible: number[] = [];
+      for (let i = 0; i < 11; i++) {
+        if (!hasKingOnTop(s.columns[i])) {
+          eligible.push(i);
+        }
+      }
+      const count = Math.min(s.stock.length, eligible.length);
       for (let i = 0; i < count; i++) {
         const card = s.stock.pop()!;
         card.faceUp = true;
-        s.columns[i].push(card);
+        s.columns[eligible[i]].push(card);
       }
       s.selected = null;
       s.lastMove = { type: 'distribute' };
@@ -664,12 +615,12 @@ export default function Page() {
     });
   }, []);
 
+  // ─── Click a card in a column ──────────────────────────────────
   const clickCard = useCallback((ci: number, cardIdx: number) => {
     setGs(prev => {
       if (!prev || prev.gameOver) return prev;
       const s = cloneGs(prev);
       const col = s.columns[ci];
-
       if (s.selected !== null) {
         if (s.selected.from === 'col' && s.selected.index === ci && s.selected.cardIndex === cardIdx) {
           s.selected = null; s.lastMove = null; return s;
@@ -680,7 +631,6 @@ export default function Page() {
           }
           s.selected = null; s.lastMove = null; return s;
         }
-
         const card = getSelectedCard(s);
         if (card && canPlaceOnColumn(card, col)) {
           const moved = removeSelectedCards(s);
@@ -689,13 +639,11 @@ export default function Page() {
           s.lastMove = { type: 'col', index: ci };
           return s;
         }
-
         if (col[cardIdx]?.faceUp) {
           s.selected = { from: 'col', index: ci, cardIndex: cardIdx }; s.lastMove = null; return s;
         }
         s.selected = null; s.lastMove = null; return s;
       }
-
       if (!col[cardIdx]?.faceUp) return prev;
       s.selected = { from: 'col', index: ci, cardIndex: cardIdx }; s.lastMove = null;
       return s;
@@ -707,7 +655,6 @@ export default function Page() {
       if (!prev || prev.gameOver) return prev;
       const s = cloneGs(prev);
       const col = s.columns[ci];
-
       if (s.selected !== null && col.length === 0) {
         const card = getSelectedCard(s);
         if (card && canPlaceOnColumn(card, col)) {
@@ -719,7 +666,6 @@ export default function Page() {
         }
         s.selected = null; s.lastMove = null; return s;
       }
-
       return prev;
     });
   }, []);
@@ -746,12 +692,8 @@ export default function Page() {
     setGs(prev => {
       if (!prev || prev.gameOver) return prev;
       const s = cloneGs(prev);
-
       if (s.selected !== null) {
-        if (s.selected.from === 'excuse') {
-          s.selected = null; return s;
-        }
-
+        if (s.selected.from === 'excuse') { s.selected = null; return s; }
         const card = getSelectedCard(s);
         if (card && card.kind === 'excuse' && s.excuseSlot === null) {
           removeSelectedCards(s);
@@ -763,12 +705,7 @@ export default function Page() {
         }
         s.selected = null; return s;
       }
-
-      if (s.excuseSlot) {
-        s.selected = { from: 'excuse' }; s.lastMove = null;
-        return s;
-      }
-
+      if (s.excuseSlot) { s.selected = { from: 'excuse' }; s.lastMove = null; return s; }
       return prev;
     });
   }, []);
@@ -795,7 +732,6 @@ export default function Page() {
       const col = s.columns[ci];
       const card = col.length > 0 ? col[col.length - 1] : null;
       if (!card) return prev;
-
       if (card.kind === 'excuse' && s.excuseSlot === null) {
         col.pop(); revealBottom(col);
         card.faceUp = true;
@@ -804,7 +740,6 @@ export default function Page() {
         s.lastMove = { type: 'excuse' };
         return s;
       }
-
       const fi = findFoundation(card, s.foundations, s.trumpsMerged);
       if (fi === -1) return prev;
       col.pop(); revealBottom(col);
@@ -816,6 +751,28 @@ export default function Page() {
     });
   }, []);
 
+  // ─── Touch handlers for swipe-to-select ────────────────────────
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    const touch = e.touches[0];
+    touchStartRef.current = { x: touch.clientX, y: touch.clientY, time: Date.now() };
+  }, []);
+
+  const handleTouchEnd = useCallback((ci: number, cardIdx: number, isLast: boolean, e: React.TouchEvent) => {
+    if (!touchStartRef.current) return;
+    const touch = e.changedTouches[0];
+    const dx = touch.clientX - touchStartRef.current.x;
+    const dy = touch.clientY - touchStartRef.current.y;
+    const dt = Date.now() - touchStartRef.current.time;
+    touchStartRef.current = null;
+
+    // Swipe up = auto-place (if last card)
+    if (dy < -40 && Math.abs(dx) < 30 && dt < 400 && isLast) {
+      e.preventDefault();
+      autoPlace(ci);
+      return;
+    }
+  }, [autoPlace]);
+
   // ═══════════════════════════════════════════════════════════════
   // Render
   // ═══════════════════════════════════════════════════════════════
@@ -823,10 +780,11 @@ export default function Page() {
   if (!mounted || !gs) {
     return (
       <div className="min-h-screen flex items-center justify-center"
-        style={{ background: 'var(--bg-felt, radial-gradient(ellipse at 50% 40%, #1e293b 0%, #0f172a 70%))' }}>
+        style={{ background: 'var(--bg-felt)' }}>
         <p style={{
-          fontFamily: '-apple-system, sans-serif', fontSize: '16px',
-          color: 'rgba(255,255,255,0.4)', fontWeight: 500,
+          color: 'rgba(255,255,255,0.4)',
+          fontFamily: "'SF Pro Display', -apple-system, sans-serif",
+          fontSize: '16px', fontWeight: 500,
         }}>
           Distribution des cartes...
         </p>
@@ -837,216 +795,70 @@ export default function Page() {
   const total = countAllPlaced(gs);
   const lm = gs.lastMove;
   const showMerge = canMergeTrumps(gs);
-  const pct = Math.round((total / 78) * 100);
+  const progress = Math.round((total / 78) * 100);
 
   return (
     <div
-      className="min-h-screen select-none"
-      style={{ background: 'var(--bg-felt, radial-gradient(ellipse at 50% 40%, #1e293b 0%, #0f172a 70%))' }}
+      className="min-h-screen select-none flex flex-col"
+      style={{ background: 'var(--bg-felt)' }}
       onClick={() => {
         if (gs.selected !== null) setGs(prev => prev ? ({ ...cloneGs(prev), selected: null, lastMove: null }) : prev);
       }}
     >
-      <div className="mx-auto px-1 py-2 sm:px-3 sm:py-3 md:px-4"
+      <div className="mx-auto px-1 py-1 sm:px-3 sm:py-2 md:px-4 flex flex-col flex-1 w-full"
         style={{ maxWidth: '960px' }} onClick={e => e.stopPropagation()}>
 
         {/* ─── Header ──────────────────────────────────── */}
-        <div className="flex items-center justify-between mb-2 sm:mb-3">
-          <div>
-            <h1 style={{
-              fontFamily: '-apple-system, sans-serif',
-              fontSize: 'clamp(14px, 3vw, 22px)',
-              fontWeight: 700,
-              color: '#fef3c7',
-              letterSpacing: '-0.3px',
-            }}>
-              La Réussite
-            </h1>
-          </div>
-          <div className="flex items-center gap-2 sm:gap-3" style={{ fontFamily: '-apple-system, sans-serif' }}>
-            {/* Progress pill */}
+        <div className="flex items-center justify-between mb-1 sm:mb-2" style={{ minHeight: '28px' }}>
+          <h1 style={{
+            fontFamily: "'SF Pro Display', -apple-system, sans-serif",
+            fontSize: 'clamp(13px, 3vw, 22px)',
+            fontWeight: 700, color: '#f8fafc', letterSpacing: '-0.02em', margin: 0,
+          }}>
+            La Reussite
+            <span style={{
+              fontWeight: 400, marginLeft: '4px',
+              color: 'rgba(255,255,255,0.25)', fontSize: 'clamp(9px, 1.8vw, 13px)',
+            }}>Tarot</span>
+          </h1>
+          <div className="flex items-center gap-1 sm:gap-2">
             <div style={{
-              display: 'flex', alignItems: 'center', gap: '6px',
-              background: 'rgba(0,0,0,0.3)',
-              borderRadius: '12px',
-              padding: '3px 10px',
-              fontSize: 'clamp(9px, 1.8vw, 12px)',
-              color: '#fbbf24',
-              fontWeight: 600,
+              display: 'flex', alignItems: 'center', gap: '4px',
+              background: 'rgba(255,255,255,0.06)', borderRadius: '999px',
+              padding: '2px 8px', fontSize: 'clamp(8px, 1.6vw, 12px)',
+              color: 'rgba(255,255,255,0.45)',
+              fontFamily: "'SF Pro Display', -apple-system, sans-serif", fontWeight: 500,
             }}>
+              <span style={{ color: '#fbbf24', fontWeight: 700 }}>{total}</span>/78
               <div style={{
-                width: 'clamp(30px, 8vw, 50px)', height: '4px',
-                background: 'rgba(255,255,255,0.1)',
-                borderRadius: '2px',
-                overflow: 'hidden',
+                width: '24px', height: '3px', background: 'rgba(255,255,255,0.1)',
+                borderRadius: '2px', overflow: 'hidden',
               }}>
                 <div style={{
-                  width: `${pct}%`, height: '100%',
+                  width: `${progress}%`, height: '100%',
                   background: 'linear-gradient(90deg, #f59e0b, #fbbf24)',
-                  borderRadius: '2px',
-                  transition: 'width 0.3s ease',
+                  borderRadius: '2px', transition: 'width 0.3s ease-out',
                 }} />
               </div>
-              {total}/78
             </div>
             <span style={{
-              fontSize: 'clamp(9px, 1.8vw, 12px)',
-              color: 'rgba(255,255,255,0.4)',
-              fontWeight: 500,
-            }}>
-              {gs.moves} coups
-            </span>
-            <button onClick={restart}
-              style={{
-                fontSize: 'clamp(9px, 1.8vw, 12px)',
-                padding: '4px 10px',
-                background: 'rgba(255,255,255,0.08)',
-                border: '1px solid rgba(255,255,255,0.12)',
-                borderRadius: '8px',
-                color: 'rgba(255,255,255,0.6)',
-                cursor: 'pointer',
-                fontWeight: 500,
-                fontFamily: '-apple-system, sans-serif',
-                transition: 'background 0.15s',
-              }}
-              onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.15)')}
-              onMouseLeave={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.08)')}
-            >
-              Nouvelle partie
-            </button>
+              fontSize: 'clamp(8px, 1.6vw, 12px)', color: 'rgba(255,255,255,0.3)',
+              fontFamily: "'SF Pro Display', -apple-system, sans-serif",
+            }}>{gs.moves}</span>
+            <button onClick={restart} style={{
+              fontSize: 'clamp(8px, 1.6vw, 12px)', padding: '3px 8px',
+              background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.55)',
+              border: '1px solid rgba(255,255,255,0.1)', borderRadius: '6px',
+              cursor: 'pointer', fontFamily: "'SF Pro Display', -apple-system, sans-serif", fontWeight: 500,
+            }}>Nouvelle</button>
           </div>
         </div>
 
-        {/* ─── Top row: Stock + Excuse + Foundations ──── */}
-        <div className="flex items-start mb-2 sm:mb-4 flex-wrap" style={{ gap: 'clamp(2px, 0.8vw, 8px)' }}>
-          {/* Stock */}
-          <div onClick={(e) => { e.stopPropagation(); distribute(); }}>
-            {gs.stock.length > 0 ? (
-              <div className="relative">
-                <CardBack onClick={() => {}} />
-                <div className="absolute flex items-center justify-center"
-                  style={{
-                    bottom: '-3px', right: '-3px',
-                    background: '#1e3a5f', color: '#93c5fd',
-                    borderRadius: '999px',
-                    width: 'calc(var(--card-fs) * 1.3)', height: 'calc(var(--card-fs) * 1.3)',
-                    fontSize: 'calc(var(--card-fs) * 0.65)', fontWeight: 700,
-                    border: '1px solid #3b82f6',
-                    fontFamily: '-apple-system, sans-serif',
-                  }}>
-                  {gs.stock.length}
-                </div>
-              </div>
-            ) : (
-              <EmptySlot label="" />
-            )}
-          </div>
-
-          {gs.stock.length > 0 && (
-            <button onClick={(e) => { e.stopPropagation(); distribute(); }}
-              style={{
-                alignSelf: 'center',
-                fontSize: 'clamp(8px, 1.3vw, 11px)',
-                fontFamily: '-apple-system, sans-serif',
-                background: 'none', border: 'none', cursor: 'pointer',
-                color: 'rgba(255,255,255,0.4)', padding: '2px 4px',
-                fontWeight: 500,
-              }}>
-              Distribuer
-            </button>
-          )}
-
-          {/* Excuse slot */}
-          <div onClick={(e) => { e.stopPropagation(); clickExcuseSlot(); }}>
-            {gs.excuseSlot ? (
-              <div className="relative cursor-pointer" style={{
-                animation: lm?.type === 'excuse' ? 'fdn-glow 0.6s ease-out' : undefined,
-                borderRadius: 'var(--card-r)',
-              }}>
-                <CardFace
-                  card={gs.excuseSlot}
-                  selected={gs.selected?.from === 'excuse'}
-                  landing={lm?.type === 'excuse'}
-                />
-              </div>
-            ) : (
-              <div
-                className="select-none flex flex-col items-center justify-center cursor-pointer"
-                style={{
-                  width: 'var(--card-w)', height: 'var(--card-h)',
-                  borderRadius: 'var(--card-r)',
-                  border: '2px dashed rgba(251,191,36,0.15)',
-                  color: 'rgba(251,191,36,0.25)',
-                  fontSize: 'calc(var(--card-fs) * 0.6)',
-                  fontFamily: '-apple-system, sans-serif',
-                  fontWeight: 600,
-                  gap: '2px',
-                }}
-              >
-                <span style={{ fontSize: 'var(--card-fs)', fontWeight: 900 }}>?</span>
-                <span>Excuse</span>
-              </div>
-            )}
-          </div>
-
-          <div className="flex-1" />
-
-          {/* 4 Suit foundations */}
-          {[0, 1, 2, 3].map(fi => (
-            <div key={fi} onClick={(e) => { e.stopPropagation(); clickFoundation(fi); }}>
-              <FoundationSlot
-                fdn={gs.foundations[fi]} fi={fi} onClick={() => {}}
-                landing={lm?.type === 'fdn' && lm.index === fi}
-              />
-            </div>
-          ))}
-
-          {/* Trump ascending */}
-          <div onClick={(e) => { e.stopPropagation(); clickFoundation(4); }}>
-            <FoundationSlot
-              fdn={gs.foundations[4]} fi={4} onClick={() => {}}
-              landing={lm?.type === 'fdn' && lm.index === 4}
-              dirLabel={gs.trumpsMerged ? '=' : '↑'}
-            />
-          </div>
-
-          {/* Merge button */}
-          {showMerge && (
-            <button
-              onClick={(e) => { e.stopPropagation(); mergeTrumps(); }}
-              style={{
-                alignSelf: 'center',
-                fontSize: 'clamp(8px, 1.3vw, 11px)',
-                fontFamily: '-apple-system, sans-serif',
-                background: 'rgba(251,191,36,0.15)',
-                color: '#fbbf24',
-                border: '1px solid rgba(251,191,36,0.3)',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                padding: '4px 8px',
-                fontWeight: 600,
-                animation: 'glow-pulse 1.5s ease-in-out infinite',
-                transition: 'background 0.15s',
-              }}
-            >
-              Fusionner
-            </button>
-          )}
-
-          {/* Trump descending */}
-          {!gs.trumpsMerged && (
-            <div onClick={(e) => { e.stopPropagation(); clickFoundation(5); }}>
-              <FoundationSlot
-                fdn={gs.foundations[5]} fi={5} onClick={() => {}}
-                landing={lm?.type === 'fdn' && lm.index === 5}
-                dirLabel="↓"
-              />
-            </div>
-          )}
-        </div>
-
-        {/* ─── Columns ─────────────────────────────────── */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(11, 1fr)', gap: '2px' }}>
+        {/* ─── Columns (main area) ─────────────────────── */}
+        <div style={{
+          display: 'grid', gridTemplateColumns: 'repeat(11, 1fr)', gap: '1px',
+          flex: 1,
+        }}>
           {gs.columns.map((col, ci) => (
             <div key={ci} className="relative" style={{ minHeight: colHeight(col) }}
               onClick={(e) => { e.stopPropagation(); clickColumn(ci); }}>
@@ -1070,6 +882,8 @@ export default function Page() {
                           appearDelay={ci}
                           onClick={(e) => { e.stopPropagation(); clickCard(ci, idx); }}
                           onDoubleClick={(e) => { e.stopPropagation(); if (isLast) autoPlace(ci); }}
+                          onTouchStart={handleTouchStart}
+                          onTouchEnd={(e) => handleTouchEnd(ci, idx, isLast, e)}
                         />
                       ) : (
                         <CardBack />
@@ -1082,52 +896,144 @@ export default function Page() {
           ))}
         </div>
 
+        {/* ─── Bottom bar: Stock + Excuse + Foundations ─── */}
+        <div style={{
+          display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start',
+          gap: '2px', marginTop: '6px', paddingBottom: '4px',
+        }}>
+          {/* Stock */}
+          <div onClick={(e) => { e.stopPropagation(); distribute(); }}>
+            {gs.stock.length > 0 ? (
+              <div className="relative">
+                <CardBack onClick={() => {}} />
+                <div className="absolute flex items-center justify-center"
+                  style={{
+                    bottom: '-3px', right: '-3px',
+                    background: '#1e293b', color: '#94a3b8',
+                    borderRadius: '999px',
+                    width: 'calc(var(--card-fs) * 1.3)', height: 'calc(var(--card-fs) * 1.3)',
+                    fontSize: 'calc(var(--card-fs) * 0.65)', fontWeight: 700,
+                    border: '1px solid #475569',
+                    fontFamily: "'SF Pro Display', -apple-system, sans-serif",
+                  }}>{gs.stock.length}</div>
+              </div>
+            ) : (
+              <EmptySlot label="" />
+            )}
+          </div>
+
+          {/* Excuse storage slot */}
+          <div onClick={(e) => { e.stopPropagation(); clickExcuseSlot(); }}>
+            {gs.excuseSlot ? (
+              <div className="relative cursor-pointer" style={{
+                animation: lm?.type === 'excuse' ? 'fdn-glow 0.6s ease-out' : undefined,
+                borderRadius: 'var(--card-r)',
+              }}>
+                <CardFace
+                  card={gs.excuseSlot}
+                  selected={gs.selected?.from === 'excuse'}
+                  landing={lm?.type === 'excuse'}
+                />
+              </div>
+            ) : (
+              <div
+                className="select-none flex flex-col items-center justify-center cursor-pointer"
+                style={{
+                  width: 'var(--card-w)', height: 'var(--card-h)',
+                  borderRadius: 'var(--card-r)',
+                  border: '1.5px dashed rgba(251,191,36,0.2)',
+                  color: 'rgba(251,191,36,0.3)',
+                  fontSize: 'calc(var(--card-fs) * 0.6)',
+                  fontFamily: "'SF Pro Display', -apple-system, sans-serif",
+                  fontWeight: 600, background: 'rgba(251,191,36,0.03)',
+                }}
+              >
+                <span style={{ fontSize: 'calc(var(--card-fs) * 0.9)', fontWeight: 800 }}>?</span>
+                <span>Excuse</span>
+              </div>
+            )}
+          </div>
+
+          <div style={{ flex: 1, minWidth: '2px' }} />
+
+          {/* 4 Suit foundations */}
+          {[0, 1, 2, 3].map(fi => (
+            <div key={fi} onClick={(e) => { e.stopPropagation(); clickFoundation(fi); }}>
+              <FoundationSlot
+                fdn={gs.foundations[fi]} fi={fi} onClick={() => {}}
+                landing={lm?.type === 'fdn' && lm.index === fi}
+
+              />
+            </div>
+          ))}
+
+          {/* Trump ascending [4] */}
+          <div onClick={(e) => { e.stopPropagation(); clickFoundation(4); }}>
+            <FoundationSlot
+              fdn={gs.foundations[4]} fi={4} onClick={() => {}}
+              landing={lm?.type === 'fdn' && lm.index === 4}
+              dirLabel={gs.trumpsMerged ? '✓' : '↑'}
+            />
+          </div>
+
+          {/* Merge button */}
+          {showMerge && (
+            <button
+              onClick={(e) => { e.stopPropagation(); mergeTrumps(); }}
+              className="self-center"
+              style={{
+                fontSize: 'clamp(7px, 1.2vw, 11px)',
+                fontFamily: "'SF Pro Display', -apple-system, sans-serif",
+                fontWeight: 600,
+                background: 'linear-gradient(135deg, #92400e, #b45309)',
+                color: '#fcd34d', border: '1px solid #d97706',
+                borderRadius: '6px', cursor: 'pointer', padding: '2px 5px',
+                animation: 'merge-pulse 1.5s ease-in-out infinite',
+              }}
+            >Fusionner</button>
+          )}
+
+          {/* Trump descending [5] */}
+          {!gs.trumpsMerged && (
+            <div onClick={(e) => { e.stopPropagation(); clickFoundation(5); }}>
+              <FoundationSlot
+                fdn={gs.foundations[5]} fi={5} onClick={() => {}}
+                landing={lm?.type === 'fdn' && lm.index === 5}
+                dirLabel="↓"
+
+              />
+            </div>
+          )}
+        </div>
+
         {/* ─── Victory ─────────────────────────────────── */}
         {gs.gameOver && (
-          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50"
-            style={{ backdropFilter: 'blur(8px)' }}>
+          <div className="fixed inset-0 flex items-center justify-center z-50"
+            style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)' }}>
             <div style={{
-              background: 'linear-gradient(135deg, #1f2937, #111827)',
-              borderRadius: '16px',
-              padding: '32px 40px',
-              textAlign: 'center',
-              boxShadow: '0 25px 50px rgba(0,0,0,0.5), 0 0 100px rgba(251,191,36,0.1)',
-              border: '1px solid rgba(251,191,36,0.2)',
-              fontFamily: '-apple-system, sans-serif',
+              background: 'linear-gradient(135deg, #1e293b, #0f172a)',
+              border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: '16px', padding: '28px', textAlign: 'center',
+              boxShadow: '0 24px 48px rgba(0,0,0,0.5)',
+              fontFamily: "'SF Pro Display', -apple-system, sans-serif",
               animation: 'card-land 0.5s ease-out',
-              maxWidth: '90vw',
+              maxWidth: '320px', margin: '0 16px',
             }}>
-              <div style={{ fontSize: '48px', marginBottom: '12px' }}>&#127881;</div>
+              <div style={{ fontSize: '44px', marginBottom: '10px' }}>🎉</div>
               <h2 style={{
-                fontSize: '28px', fontWeight: 800, color: '#fbbf24',
-                marginBottom: '8px', letterSpacing: '-0.5px',
-              }}>
-                Victoire !
-              </h2>
+                fontSize: '26px', fontWeight: 800, marginBottom: '6px',
+                color: '#f8fafc', letterSpacing: '-0.02em',
+              }}>Victoire !</h2>
               <p style={{
-                color: 'rgba(255,255,255,0.4)', marginBottom: '24px',
-                fontSize: '14px', fontWeight: 500,
-              }}>
-                Termin&#233; en {gs.moves} coups
-              </p>
-              <button onClick={restart}
-                style={{
-                  background: 'linear-gradient(135deg, #f59e0b, #d97706)',
-                  color: '#1f2937',
-                  border: 'none',
-                  borderRadius: '10px',
-                  padding: '10px 28px',
-                  fontSize: '16px',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  fontFamily: '-apple-system, sans-serif',
-                  transition: 'transform 0.1s',
-                }}
-                onMouseDown={e => (e.currentTarget.style.transform = 'scale(0.97)')}
-                onMouseUp={e => (e.currentTarget.style.transform = 'scale(1)')}
-              >
-                Rejouer
-              </button>
+                color: 'rgba(255,255,255,0.4)', marginBottom: '20px', fontSize: '13px',
+              }}>Terminé en {gs.moves} coups</p>
+              <button onClick={restart} style={{
+                background: 'linear-gradient(135deg, #f59e0b, #d97706)',
+                color: '#1e293b', padding: '10px 24px', borderRadius: '10px',
+                fontSize: '15px', fontWeight: 700, border: 'none', cursor: 'pointer',
+                fontFamily: "'SF Pro Display', -apple-system, sans-serif",
+                boxShadow: '0 4px 12px rgba(245,158,11,0.3)',
+              }}>Rejouer</button>
             </div>
           </div>
         )}

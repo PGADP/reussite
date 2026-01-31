@@ -16,9 +16,9 @@
   --card-fs: 8px;
   --card-fs-lg: 11px;
 
-  /* Color palette */
-  --bg-main: #0f172a;
-  --bg-felt: radial-gradient(ellipse at 50% 40%, #1e293b 0%, #0f172a 70%);
+  /* Color palette — subtle green felt */
+  --bg-main: #0a1f12;
+  --bg-felt: radial-gradient(ellipse at 50% 40%, #163a22 0%, #0d2818 60%, #091a0f 100%);
   --accent: #f59e0b;
   --accent-glow: rgba(245, 158, 11, 0.5);
   --text-muted: rgba(255, 255, 255, 0.45);
@@ -188,5 +188,16 @@ html, body {
   100% {
     transform: scaleX(1) rotateY(0deg);
     opacity: 1;
+  }
+}
+
+@keyframes merge-pulse {
+  0%, 100% {
+    box-shadow: 0 0 6px rgba(245, 158, 11, 0.3);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 16px rgba(245, 158, 11, 0.6);
+    transform: scale(1.05);
   }
 }
