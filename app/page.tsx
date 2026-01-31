@@ -936,9 +936,24 @@ export default function Page() {
       }
 
       // Try to place selected card on this foundation
+      // From a column: always try the top (last) card only, not the whole sequence
+      if (s.selected?.from === 'col') {
+        const col = s.columns[s.selected.index];
+        const topCard = col.length > 0 ? col[col.length - 1] : null;
+        if (!topCard || !canPlaceOnFoundation(topCard, fi, s.foundations, s.trumpsMerged)) {
+          s.selected = null; return s;
+        }
+        col.pop();
+        revealBottom(col);
+        s.foundations[fi].push(topCard);
+        s.selected = null; s.moves++;
+        s.lastMove = { type: 'fdn', index: fi };
+        if (isWin(s)) s.gameOver = true;
+        return s;
+      }
+      // From excuse or foundation
       const card = getSelectedCard(s);
-      const isSubSeq = s.selected?.from === 'col' && s.selected.cardIndex < s.columns[s.selected.index].length - 1;
-      if (!card || isSubSeq || !canPlaceOnFoundation(card, fi, s.foundations, s.trumpsMerged)) {
+      if (!card || !canPlaceOnFoundation(card, fi, s.foundations, s.trumpsMerged)) {
         s.selected = null; return s;
       }
       removeSelectedCards(s);
@@ -1253,9 +1268,23 @@ export default function Page() {
         if (!prev) return prev;
         const s = cloneGs(prev);
         s.selected = d.from;
+        // From a column: always try the top (last) card only
+        if (s.selected?.from === 'col') {
+          const col = s.columns[s.selected.index];
+          const topCard = col.length > 0 ? col[col.length - 1] : null;
+          if (!topCard || !canPlaceOnFoundation(topCard, fi, s.foundations, s.trumpsMerged)) {
+            s.selected = null; return s;
+          }
+          col.pop();
+          revealBottom(col);
+          s.foundations[fi].push(topCard);
+          s.selected = null; s.moves++;
+          s.lastMove = { type: 'fdn', index: fi };
+          if (isWin(s)) s.gameOver = true;
+          return s;
+        }
         const card = getSelectedCard(s);
-        const isSubSeq = s.selected?.from === 'col' && s.selected.cardIndex < s.columns[s.selected.index].length - 1;
-        if (!card || isSubSeq || !canPlaceOnFoundation(card, fi, s.foundations, s.trumpsMerged)) {
+        if (!card || !canPlaceOnFoundation(card, fi, s.foundations, s.trumpsMerged)) {
           s.selected = null; return s;
         }
         removeSelectedCards(s);
