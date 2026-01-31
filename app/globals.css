@@ -2,102 +2,135 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ═══════════════════════════════════════════════════════════════════
+   CSS Variables — Mobile-first (portrait phone)
+   ═══════════════════════════════════════════════════════════════════ */
+
 :root {
-  --card-w: 30px;
-  --card-h: 44px;
-  --peek-down: 8px;
-  --peek-up: 18px;
+  /* Card sizing — tiny for 11-column grid on small phones */
+  --card-w: 28px;
+  --card-h: 40px;
+  --peek-down: 6px;
+  --peek-up: 13px;
   --card-r: 3px;
-  --card-fs: 9px;
-  --card-fs-lg: 14px;
+  --card-fs: 8px;
+  --card-fs-lg: 11px;
+
+  /* Color palette */
+  --bg-main: #0f172a;
+  --bg-felt: radial-gradient(ellipse at 50% 40%, #1e293b 0%, #0f172a 70%);
+  --accent: #f59e0b;
+  --accent-glow: rgba(245, 158, 11, 0.5);
+  --text-muted: rgba(255, 255, 255, 0.45);
+  --card-border: rgba(255, 255, 255, 0.1);
+  --card-shadow: 0 1px 3px rgba(0,0,0,0.4);
 }
 
-@media (min-width: 480px) {
+/* Slightly bigger phones (375px+) */
+@media (min-width: 375px) {
   :root {
-    --card-w: 46px;
-    --card-h: 66px;
+    --card-w: 30px;
+    --card-h: 44px;
+    --peek-down: 7px;
+    --peek-up: 15px;
+    --card-r: 3px;
+    --card-fs: 9px;
+    --card-fs-lg: 13px;
+  }
+}
+
+/* Larger phones (420px+) */
+@media (min-width: 420px) {
+  :root {
+    --card-w: 33px;
+    --card-h: 48px;
+    --peek-down: 8px;
+    --peek-up: 17px;
+    --card-r: 4px;
+    --card-fs: 10px;
+    --card-fs-lg: 15px;
+  }
+}
+
+/* Landscape / small tablets */
+@media (min-width: 520px) {
+  :root {
+    --card-w: 44px;
+    --card-h: 64px;
     --peek-down: 10px;
     --peek-up: 22px;
-    --card-r: 4px;
+    --card-r: 5px;
     --card-fs: 11px;
     --card-fs-lg: 18px;
   }
 }
 
+/* Tablets */
 @media (min-width: 700px) {
   :root {
-    --card-w: 58px;
-    --card-h: 82px;
+    --card-w: 56px;
+    --card-h: 80px;
     --peek-down: 13px;
     --peek-up: 26px;
-    --card-r: 5px;
+    --card-r: 6px;
     --card-fs: 13px;
     --card-fs-lg: 22px;
   }
 }
 
+/* Desktop */
 @media (min-width: 960px) {
   :root {
     --card-w: 68px;
     --card-h: 96px;
     --peek-down: 15px;
     --peek-up: 30px;
-    --card-r: 6px;
+    --card-r: 7px;
     --card-fs: 15px;
     --card-fs-lg: 26px;
   }
 }
 
-body {
+html, body {
   margin: 0;
   overflow-x: hidden;
+  background: var(--bg-main);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 
 /* ═══════════════════════════════════════════════════════════════════
    Animations
    ═══════════════════════════════════════════════════════════════════ */
 
-/* Card landing bounce */
 @keyframes card-land {
   0% {
     transform: scale(1.18) translateY(-4px);
-    box-shadow: 0 0 16px rgba(251, 191, 36, 0.5);
+    box-shadow: 0 0 16px var(--accent-glow);
   }
-  35% {
-    transform: scale(0.96) translateY(1px);
-  }
-  60% {
-    transform: scale(1.04) translateY(-1px);
-  }
-  80% {
-    transform: scale(0.99);
-  }
+  35% { transform: scale(0.96) translateY(1px); }
+  60% { transform: scale(1.04) translateY(-1px); }
+  80% { transform: scale(0.99); }
   100% {
     transform: scale(1) translateY(0);
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+    box-shadow: var(--card-shadow);
   }
 }
 
-/* Selected card gentle lift + pulse */
 @keyframes card-selected {
-  0% {
-    transform: translateY(0);
-  }
-  100% {
-    transform: translateY(-5px);
-  }
+  0% { transform: translateY(0); }
+  100% { transform: translateY(-5px); }
 }
 
 @keyframes glow-pulse {
   0%, 100% {
-    box-shadow: 0 0 8px rgba(245, 158, 11, 0.4), 0 2px 4px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 0 8px rgba(245, 158, 11, 0.4), 0 2px 4px rgba(0, 0, 0, 0.3);
   }
   50% {
-    box-shadow: 0 0 18px rgba(245, 158, 11, 0.7), 0 4px 8px rgba(0, 0, 0, 0.25);
+    box-shadow: 0 0 20px rgba(245, 158, 11, 0.7), 0 4px 8px rgba(0, 0, 0, 0.35);
   }
 }
 
-/* Distribution card appear */
 @keyframes card-appear {
   0% {
     opacity: 0;
@@ -107,31 +140,25 @@ body {
     opacity: 1;
     transform: translateY(3px) scale(1.04);
   }
-  75% {
-    transform: translateY(-1px) scale(0.99);
-  }
+  75% { transform: translateY(-1px) scale(0.99); }
   100% {
     opacity: 1;
     transform: translateY(0) scale(1);
   }
 }
 
-/* Sparkle particle fly outward */
 @keyframes sparkle-fly {
   0% {
     opacity: 1;
     transform: translate(0, 0) scale(1);
   }
-  60% {
-    opacity: 0.8;
-  }
+  60% { opacity: 0.8; }
   100% {
     opacity: 0;
     transform: translate(var(--sx), var(--sy)) scale(0);
   }
 }
 
-/* Sparkle star rotation */
 @keyframes sparkle-star {
   0% {
     opacity: 1;
@@ -143,20 +170,12 @@ body {
   }
 }
 
-/* Foundation receive glow */
 @keyframes fdn-glow {
-  0% {
-    box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.6);
-  }
-  50% {
-    box-shadow: 0 0 20px 4px rgba(251, 191, 36, 0.4);
-  }
-  100% {
-    box-shadow: 0 0 0 0 rgba(251, 191, 36, 0);
-  }
+  0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.6); }
+  50% { box-shadow: 0 0 20px 4px rgba(245, 158, 11, 0.4); }
+  100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
 }
 
-/* Card flip reveal */
 @keyframes card-reveal {
   0% {
     transform: scaleX(0) rotateY(90deg);
@@ -169,17 +188,5 @@ body {
   100% {
     transform: scaleX(1) rotateY(0deg);
     opacity: 1;
-  }
-}
-
-/* Victory confetti-like burst */
-@keyframes confetti-fall {
-  0% {
-    transform: translateY(-20px) rotate(0deg);
-    opacity: 1;
-  }
-  100% {
-    transform: translateY(100vh) rotate(720deg);
-    opacity: 0.3;
   }
 }

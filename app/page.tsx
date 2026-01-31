@@ -17,7 +17,7 @@ interface Card {
 }
 
 type SelectedSource =
-  | { from: 'col'; index: number; cardIndex: number }  // cardIndex = index within column
+  | { from: 'col'; index: number; cardIndex: number }
   | { from: 'excuse' };
 
 type LastMove =
@@ -70,44 +70,44 @@ function shuffle<T>(arr: T[]): T[] {
 const isRed = (c: Card) => c.suit === 'hearts' || c.suit === 'diamonds';
 
 const displayVal = (c: Card): string => {
-  if (c.kind === 'excuse') return '★';
+  if (c.kind === 'excuse') return '?';
   if (c.kind === 'trump') return String(c.value);
   return VAL_DISPLAY[c.value] ?? String(c.value);
 };
 
 const suitSym = (c: Card): string => {
-  if (c.kind === 'excuse') return '★';
-  if (c.kind === 'trump') return '★';
+  if (c.kind === 'excuse') return '';
+  if (c.kind === 'trump') return '';
   return SUIT_SYM[c.suit!];
 };
 
-// Trump & excuse: black text on green bg
+// Card colors: suit=red/black on white, trump=gold on dark, excuse=gold on dark
 const textColor = (c: Card): string => {
-  if (c.kind === 'excuse') return '#111827';
-  if (c.kind === 'trump') return '#111827';
-  return isRed(c) ? '#be123c' : '#1e293b';
+  if (c.kind === 'excuse') return '#fbbf24';
+  if (c.kind === 'trump') return '#fbbf24';
+  return isRed(c) ? '#dc2626' : '#1e293b';
 };
 
 const cardBg = (c: Card, selected: boolean): string => {
-  if (selected) return '#bbf7d0'; // selected green tint
-  if (c.kind === 'trump' || c.kind === 'excuse') return '#86efac'; // solid green
-  if (isRed(c)) return '#fff5f5';
-  return '#f8fafc';
+  if (c.kind === 'trump') return selected ? '#374151' : '#1f2937';
+  if (c.kind === 'excuse') return selected ? '#374151' : '#1f2937';
+  if (selected) return '#fefce8';
+  return '#ffffff';
 };
 
-const sideStripeColor = (c: Card): string => {
-  if (c.kind === 'trump' || c.kind === 'excuse') return '#166534';
-  return textColor(c);
+const cardBorder = (c: Card, selected: boolean): string => {
+  if (selected) return '2px solid #f59e0b';
+  if (c.kind === 'trump' || c.kind === 'excuse') return '1px solid #4b5563';
+  return '1px solid #e5e7eb';
 };
 
 // ═══════════════════════════════════════════════════════════════════
-// Game state — foundations[0..3] suits, [4] trump 1→, [5] trump ←21
-// excuseSlot: dedicated storage for l'Excuse
+// Game state
 // ═══════════════════════════════════════════════════════════════════
 
 interface GameState {
   columns: Card[][];
-  foundations: Card[][]; // 0-3: suits, 4: trump ↑ (1→), 5: trump ↓ (←21)
+  foundations: Card[][];
   excuseSlot: Card | null;
   stock: Card[];
   selected: SelectedSource | null;
@@ -162,29 +162,22 @@ function canPlaceOnColumn(card: Card, col: Card[]): boolean {
 
 function canPlaceOnFoundation(card: Card, fi: number, allFdns: Card[][], merged: boolean): boolean {
   const fdn = allFdns[fi];
-
-  // Suit foundations [0..3]
   if (fi < 4) {
     if (card.kind !== 'suit' || card.suit !== SUITS[fi]) return false;
     return fdn.length === 0 ? card.value === 1 : card.value === fdn[fdn.length - 1].value + 1;
   }
-
-  // Trump ascending [4]: 1 →
   if (fi === 4) {
     if (card.kind !== 'trump') return false;
-    if (merged) return false; // already merged, no more placing
+    if (merged) return false;
     if (fdn.length === 0) return card.value === 1;
     return card.value === fdn[fdn.length - 1].value + 1;
   }
-
-  // Trump descending [5]: ← 21
   if (fi === 5) {
     if (card.kind !== 'trump') return false;
     if (merged) return false;
     if (fdn.length === 0) return card.value === 21;
     return card.value === fdn[fdn.length - 1].value - 1;
   }
-
   return false;
 }
 
@@ -199,7 +192,6 @@ function canMergeTrumps(gs: GameState): boolean {
   const asc = gs.foundations[4];
   const desc = gs.foundations[5];
   if (asc.length === 0 || desc.length === 0) return false;
-  // They meet when ascending top + 1 === descending top
   return asc[asc.length - 1].value + 1 === desc[desc.length - 1].value;
 }
 
@@ -209,8 +201,6 @@ function countAllPlaced(gs: GameState): number {
 }
 
 function isWin(gs: GameState): boolean {
-  // All 78 cards placed: 4×14 suits + 21 trumps + 1 excuse
-  // Suits in foundations, trumps merged in [4], excuse stored
   const suitsDone = gs.foundations[0].length === 14 && gs.foundations[1].length === 14
     && gs.foundations[2].length === 14 && gs.foundations[3].length === 14;
   const trumpsDone = gs.foundations[4].length + gs.foundations[5].length === 21;
@@ -237,7 +227,6 @@ function revealBottom(col: Card[]) {
     col[col.length - 1].faceUp = true;
 }
 
-// Get the top card of the selected sub-sequence (the card that was clicked)
 function getSelectedCard(gs: GameState): Card | null {
   if (!gs.selected) return null;
   if (gs.selected.from === 'excuse') return gs.excuseSlot;
@@ -246,7 +235,6 @@ function getSelectedCard(gs: GameState): Card | null {
   return ci < col.length ? col[ci] : null;
 }
 
-// Remove the selected sub-sequence from source and return the cards
 function removeSelectedCards(gs: GameState): Card[] {
   if (!gs.selected) return [];
   if (gs.selected.from === 'excuse') {
@@ -318,7 +306,7 @@ function SparkleOverlay() {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// Card sub-components — improved readability
+// Card sub-components
 // ═══════════════════════════════════════════════════════════════════
 
 function CardFace({ card, selected, landing, appearing, appearDelay, onClick, onDoubleClick }: {
@@ -332,8 +320,10 @@ function CardFace({ card, selected, landing, appearing, appearDelay, onClick, on
 }) {
   const color = textColor(card);
   const bg = cardBg(card, !!selected);
+  const border = cardBorder(card, !!selected);
   const isExcuse = card.kind === 'excuse';
   const isTrump = card.kind === 'trump';
+  const isDark = isTrump || isExcuse;
 
   const animStyle: React.CSSProperties = {};
   if (landing) {
@@ -353,42 +343,106 @@ function CardFace({ card, selected, landing, appearing, appearDelay, onClick, on
         width: 'var(--card-w)', height: 'var(--card-h)',
         borderRadius: 'var(--card-r)',
         background: bg,
-        border: selected ? '2px solid #f59e0b' : (isTrump || isExcuse) ? '1px solid #16a34a' : '1px solid #d1d5db',
+        border,
         boxShadow: selected
-          ? '0 0 8px rgba(245,158,11,0.6), 0 2px 4px rgba(0,0,0,0.2)'
-          : '0 1px 3px rgba(0,0,0,0.15)',
+          ? '0 0 12px rgba(245,158,11,0.5), 0 4px 8px rgba(0,0,0,0.3)'
+          : isDark
+            ? '0 2px 6px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05)'
+            : '0 1px 4px rgba(0,0,0,0.12), inset 0 1px 0 rgba(255,255,255,0.8)',
         display: 'flex', flexDirection: 'column',
         alignItems: isExcuse ? 'center' : 'flex-start',
         justifyContent: isExcuse ? 'center' : 'flex-start',
         padding: isExcuse ? '0' : 'calc(var(--card-fs) * 0.2)',
-        fontFamily: 'Georgia, "Times New Roman", serif',
+        fontFamily: '-apple-system, "Segoe UI", Roboto, sans-serif',
         color,
         overflow: 'hidden', position: 'relative',
-        transition: 'background 0.15s, border-color 0.15s',
+        transition: 'background 0.15s, border-color 0.15s, box-shadow 0.15s',
         ...animStyle,
       }}
     >
       {isExcuse ? (
+        /* ── Excuse: centered "?" with label ── */
         <div style={{
           display: 'flex', flexDirection: 'column', alignItems: 'center',
+          gap: '1px',
         }}>
           <div style={{
             fontSize: 'var(--card-fs-lg)',
+            fontWeight: 900,
             lineHeight: 1,
+            color: '#fbbf24',
+            textShadow: '0 0 8px rgba(251,191,36,0.4)',
           }}>
-            ★
+            ?
           </div>
           <div style={{
-            fontSize: 'calc(var(--card-fs) * 0.6)',
-            fontWeight: 700,
-            lineHeight: 1.2,
+            fontSize: 'calc(var(--card-fs) * 0.55)',
+            fontWeight: 600,
+            lineHeight: 1,
+            color: '#9ca3af',
+            letterSpacing: '0.5px',
+            textTransform: 'uppercase',
           }}>
             Excuse
           </div>
         </div>
-      ) : (
+      ) : isTrump ? (
+        /* ── Trump: bold number only, no symbol ── */
         <>
-          {/* ── Top-left corner: value + suit ────────── */}
+          {/* Top-left number */}
+          <div style={{
+            fontSize: 'var(--card-fs)',
+            fontWeight: 900,
+            lineHeight: 1,
+            color: '#fbbf24',
+            letterSpacing: '-0.5px',
+          }}>
+            {displayVal(card)}
+          </div>
+
+          {/* Center: large number watermark */}
+          <div style={{
+            position: 'absolute',
+            top: '50%', left: '50%',
+            transform: 'translate(-50%, -50%)',
+            fontSize: 'var(--card-fs-lg)',
+            fontWeight: 900,
+            lineHeight: 1,
+            color: '#fbbf24',
+            opacity: 0.15,
+          }}>
+            {displayVal(card)}
+          </div>
+
+          {/* Subtle top accent line */}
+          <div style={{
+            position: 'absolute',
+            top: 0, left: '15%', right: '15%',
+            height: '2px',
+            background: 'linear-gradient(90deg, transparent, #fbbf24, transparent)',
+            opacity: 0.3,
+            borderRadius: '0 0 2px 2px',
+          }} />
+
+          {/* Bottom-right number (inverted) */}
+          <div style={{
+            position: 'absolute',
+            bottom: 'calc(var(--card-fs) * 0.2)',
+            right: 'calc(var(--card-fs) * 0.25)',
+            fontSize: 'var(--card-fs)',
+            fontWeight: 900,
+            lineHeight: 1,
+            color: '#fbbf24',
+            transform: 'rotate(180deg)',
+            letterSpacing: '-0.5px',
+          }}>
+            {displayVal(card)}
+          </div>
+        </>
+      ) : (
+        /* ── Suit cards: classic layout ── */
+        <>
+          {/* Top-left: value + suit */}
           <div style={{
             fontSize: 'var(--card-fs)',
             fontWeight: 800,
@@ -396,36 +450,25 @@ function CardFace({ card, selected, landing, appearing, appearDelay, onClick, on
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
-            textShadow: '0 0.5px 0 rgba(0,0,0,0.08)',
           }}>
             <span>{displayVal(card)}</span>
-            <span style={{ fontSize: 'calc(var(--card-fs) * 0.9)' }}>{suitSym(card)}</span>
+            <span style={{ fontSize: 'calc(var(--card-fs) * 0.85)' }}>{suitSym(card)}</span>
           </div>
 
-          {/* ── Center: prominent display ────────────── */}
+          {/* Center: large suit symbol */}
           <div style={{
             position: 'absolute',
             top: '50%', left: '50%',
             transform: 'translate(-50%, -50%)',
             fontSize: 'var(--card-fs-lg)',
             lineHeight: 1,
-            opacity: isTrump ? 0.2 : 0.3,
+            opacity: 0.15,
             fontWeight: 700,
           }}>
-            {isTrump ? displayVal(card) : suitSym(card)}
+            {suitSym(card)}
           </div>
 
-          {/* ── Colored side stripe for quick ID ──────── */}
-          <div style={{
-            position: 'absolute',
-            top: 0, left: 0, bottom: 0,
-            width: 'calc(var(--card-r) * 0.6)',
-            borderRadius: 'var(--card-r) 0 0 var(--card-r)',
-            background: sideStripeColor(card),
-            opacity: 0.4,
-          }} />
-
-          {/* ── Bottom-right corner (inverted) ────────── */}
+          {/* Bottom-right (inverted) */}
           <div style={{
             position: 'absolute',
             bottom: 'calc(var(--card-fs) * 0.2)',
@@ -437,10 +480,9 @@ function CardFace({ card, selected, landing, appearing, appearDelay, onClick, on
             flexDirection: 'column',
             alignItems: 'center',
             transform: 'rotate(180deg)',
-            textShadow: '0 0.5px 0 rgba(0,0,0,0.08)',
           }}>
             <span>{displayVal(card)}</span>
-            <span style={{ fontSize: 'calc(var(--card-fs) * 0.9)' }}>{suitSym(card)}</span>
+            <span style={{ fontSize: 'calc(var(--card-fs) * 0.85)' }}>{suitSym(card)}</span>
           </div>
         </>
       )}
@@ -457,12 +499,22 @@ function CardBack({ onClick }: { onClick?: (e: React.MouseEvent) => void }) {
       style={{
         width: 'var(--card-w)', height: 'var(--card-h)',
         borderRadius: 'var(--card-r)',
-        border: '1px solid #1e3a5f',
-        boxShadow: '0 1px 3px rgba(0,0,0,0.15)',
-        background: `repeating-linear-gradient(45deg,#1e3a5f,#1e3a5f 3px,#2a4a7f 3px,#2a4a7f 6px)`,
+        border: '1px solid #334155',
+        boxShadow: '0 2px 6px rgba(0,0,0,0.3)',
+        background: `linear-gradient(135deg, #1e293b 0%, #334155 50%, #1e293b 100%)`,
         cursor: onClick ? 'pointer' : 'default',
+        position: 'relative',
+        overflow: 'hidden',
       }}
-    />
+    >
+      {/* Diamond pattern overlay */}
+      <div style={{
+        position: 'absolute', inset: '3px',
+        borderRadius: 'calc(var(--card-r) - 2px)',
+        border: '1px solid rgba(251,191,36,0.15)',
+        background: `repeating-conic-gradient(rgba(251,191,36,0.04) 0% 25%, transparent 0% 50%) 0 0 / 8px 8px`,
+      }} />
+    </div>
   );
 }
 
@@ -478,10 +530,10 @@ function EmptySlot({ label, onClick, color }: {
       style={{
         width: 'var(--card-w)', height: 'var(--card-h)',
         borderRadius: 'var(--card-r)',
-        border: `2px dashed ${color ?? 'rgba(255,255,255,0.2)'}`,
-        color: color ?? 'rgba(255,255,255,0.3)',
+        border: `2px dashed ${color ?? 'rgba(255,255,255,0.12)'}`,
+        color: color ?? 'rgba(255,255,255,0.2)',
         fontSize: 'var(--card-fs)',
-        fontFamily: 'Georgia, serif',
+        fontFamily: '-apple-system, sans-serif',
         fontWeight: 700,
         cursor: onClick ? 'pointer' : 'default',
         lineHeight: 1.1,
@@ -494,14 +546,13 @@ function EmptySlot({ label, onClick, color }: {
   );
 }
 
-// Foundation slot labels and colors
 const FDN_CONFIG: { emptyLabel: string; color: string }[] = [
-  { emptyLabel: '♥', color: 'rgba(190,18,60,0.3)' },
-  { emptyLabel: '♦', color: 'rgba(190,18,60,0.3)' },
-  { emptyLabel: '♣', color: 'rgba(255,255,255,0.25)' },
-  { emptyLabel: '♠', color: 'rgba(255,255,255,0.25)' },
-  { emptyLabel: '1\n★↑', color: 'rgba(22,163,74,0.35)' },
-  { emptyLabel: '21\n★↓', color: 'rgba(22,163,74,0.35)' },
+  { emptyLabel: '♥', color: 'rgba(220,38,38,0.25)' },
+  { emptyLabel: '♦', color: 'rgba(220,38,38,0.25)' },
+  { emptyLabel: '♣', color: 'rgba(255,255,255,0.15)' },
+  { emptyLabel: '♠', color: 'rgba(255,255,255,0.15)' },
+  { emptyLabel: '1\n↑', color: 'rgba(251,191,36,0.2)' },
+  { emptyLabel: '21\n↓', color: 'rgba(251,191,36,0.2)' },
 ];
 
 function FoundationSlot({ fdn, fi, onClick, landing, dirLabel }: {
@@ -537,32 +588,33 @@ function FoundationSlot({ fdn, fi, onClick, landing, dirLabel }: {
       <div
         className="absolute flex items-center justify-center"
         style={{
-          bottom: '-2px', right: '-2px',
-          background: fi >= 4 ? '#14532d' : '#065f46',
-          color: '#a7f3d0',
+          bottom: '-3px', right: '-3px',
+          background: fi >= 4 ? '#92400e' : '#065f46',
+          color: fi >= 4 ? '#fde68a' : '#a7f3d0',
           borderRadius: '999px',
           width: 'calc(var(--card-fs) * 1.3)',
           height: 'calc(var(--card-fs) * 1.3)',
-          fontSize: 'calc(var(--card-fs) * 0.7)',
+          fontSize: 'calc(var(--card-fs) * 0.65)',
           fontWeight: 700,
-          border: '1px solid #047857',
+          border: fi >= 4 ? '1px solid #b45309' : '1px solid #047857',
+          fontFamily: '-apple-system, sans-serif',
         }}
       >
         {fdn.length}
       </div>
-      {/* Direction badge for trump piles */}
       {dirLabel && (
         <div
           className="absolute flex items-center justify-center"
           style={{
-            top: '-2px', left: '-2px',
-            background: '#14532d', color: '#86efac',
+            top: '-3px', left: '-3px',
+            background: '#78350f', color: '#fde68a',
             borderRadius: '999px',
             width: 'calc(var(--card-fs) * 1.1)',
             height: 'calc(var(--card-fs) * 1.1)',
-            fontSize: 'calc(var(--card-fs) * 0.7)',
+            fontSize: 'calc(var(--card-fs) * 0.65)',
             fontWeight: 700,
-            border: '1px solid #166534',
+            border: '1px solid #92400e',
+            fontFamily: '-apple-system, sans-serif',
           }}
         >
           {dirLabel}
@@ -596,7 +648,6 @@ export default function Page() {
 
   const restart = useCallback(() => setGs(newGameState()), []);
 
-  // ─── Distribute ────────────────────────────────────────────────
   const distribute = useCallback(() => {
     setGs(prev => {
       if (!prev || prev.gameOver || prev.stock.length === 0) return prev;
@@ -613,7 +664,6 @@ export default function Page() {
     });
   }, []);
 
-  // ─── Click a card in a column (supports sub-sequence selection) ──
   const clickCard = useCallback((ci: number, cardIdx: number) => {
     setGs(prev => {
       if (!prev || prev.gameOver) return prev;
@@ -621,11 +671,9 @@ export default function Page() {
       const col = s.columns[ci];
 
       if (s.selected !== null) {
-        // Clicking same column same card => deselect
         if (s.selected.from === 'col' && s.selected.index === ci && s.selected.cardIndex === cardIdx) {
           s.selected = null; s.lastMove = null; return s;
         }
-        // Clicking same column different card => re-select within same column
         if (s.selected.from === 'col' && s.selected.index === ci) {
           if (col[cardIdx]?.faceUp) {
             s.selected = { from: 'col', index: ci, cardIndex: cardIdx }; s.lastMove = null; return s;
@@ -633,7 +681,6 @@ export default function Page() {
           s.selected = null; s.lastMove = null; return s;
         }
 
-        // Try to place the selected sub-sequence on this column
         const card = getSelectedCard(s);
         if (card && canPlaceOnColumn(card, col)) {
           const moved = removeSelectedCards(s);
@@ -643,21 +690,18 @@ export default function Page() {
           return s;
         }
 
-        // Click another column with face-up card => re-select
         if (col[cardIdx]?.faceUp) {
           s.selected = { from: 'col', index: ci, cardIndex: cardIdx }; s.lastMove = null; return s;
         }
         s.selected = null; s.lastMove = null; return s;
       }
 
-      // Nothing selected => select this card (and everything below it)
       if (!col[cardIdx]?.faceUp) return prev;
       s.selected = { from: 'col', index: ci, cardIndex: cardIdx }; s.lastMove = null;
       return s;
     });
   }, []);
 
-  // ─── Click empty column ────────────────────────────────────────
   const clickColumn = useCallback((ci: number) => {
     setGs(prev => {
       if (!prev || prev.gameOver) return prev;
@@ -680,13 +724,11 @@ export default function Page() {
     });
   }, []);
 
-  // ─── Click foundation ──────────────────────────────────────────
   const clickFoundation = useCallback((fi: number) => {
     setGs(prev => {
       if (!prev || prev.gameOver || prev.selected === null) return prev;
       const s = cloneGs(prev);
       const card = getSelectedCard(s);
-      // Only single cards can go to foundations (not sub-sequences)
       const isSubSeq = s.selected?.from === 'col' && s.selected.cardIndex < s.columns[s.selected.index].length - 1;
       if (!card || isSubSeq || !canPlaceOnFoundation(card, fi, s.foundations, s.trumpsMerged)) {
         s.selected = null; return s;
@@ -700,15 +742,12 @@ export default function Page() {
     });
   }, []);
 
-  // ─── Click excuse slot ──────────────────────────────────────────
   const clickExcuseSlot = useCallback(() => {
     setGs(prev => {
       if (!prev || prev.gameOver) return prev;
       const s = cloneGs(prev);
 
-      // Something selected => try to store it in excuse slot
       if (s.selected !== null) {
-        // If already selected from excuse, deselect
         if (s.selected.from === 'excuse') {
           s.selected = null; return s;
         }
@@ -725,7 +764,6 @@ export default function Page() {
         s.selected = null; return s;
       }
 
-      // Nothing selected => pick up excuse from slot
       if (s.excuseSlot) {
         s.selected = { from: 'excuse' }; s.lastMove = null;
         return s;
@@ -735,12 +773,10 @@ export default function Page() {
     });
   }, []);
 
-  // ─── Merge trump piles ──────────────────────────────────────────
   const mergeTrumps = useCallback(() => {
     setGs(prev => {
       if (!prev || prev.gameOver || !canMergeTrumps(prev)) return prev;
       const s = cloneGs(prev);
-      // Merge descending into ascending: [1..N] + reversed [21..N+1] = [1..21]
       const descReversed = [...s.foundations[5]].reverse();
       s.foundations[4] = [...s.foundations[4], ...descReversed];
       s.foundations[5] = [];
@@ -752,7 +788,6 @@ export default function Page() {
     });
   }, []);
 
-  // ─── Double-click auto-place ───────────────────────────────────
   const autoPlace = useCallback((ci: number) => {
     setGs(prev => {
       if (!prev || prev.gameOver) return prev;
@@ -761,7 +796,6 @@ export default function Page() {
       const card = col.length > 0 ? col[col.length - 1] : null;
       if (!card) return prev;
 
-      // Auto-store excuse in slot
       if (card.kind === 'excuse' && s.excuseSlot === null) {
         col.pop(); revealBottom(col);
         card.faceUp = true;
@@ -789,8 +823,11 @@ export default function Page() {
   if (!mounted || !gs) {
     return (
       <div className="min-h-screen flex items-center justify-center"
-        style={{ background: 'radial-gradient(ellipse at center, #1a5c2a 0%, #0d3315 60%, #091f0e 100%)' }}>
-        <p className="text-amber-100/60" style={{ fontFamily: 'Georgia, serif', fontSize: '18px' }}>
+        style={{ background: 'var(--bg-felt, radial-gradient(ellipse at 50% 40%, #1e293b 0%, #0f172a 70%))' }}>
+        <p style={{
+          fontFamily: '-apple-system, sans-serif', fontSize: '16px',
+          color: 'rgba(255,255,255,0.4)', fontWeight: 500,
+        }}>
           Distribution des cartes...
         </p>
       </div>
@@ -800,11 +837,12 @@ export default function Page() {
   const total = countAllPlaced(gs);
   const lm = gs.lastMove;
   const showMerge = canMergeTrumps(gs);
+  const pct = Math.round((total / 78) * 100);
 
   return (
     <div
       className="min-h-screen select-none"
-      style={{ background: 'radial-gradient(ellipse at center, #1a5c2a 0%, #0d3315 60%, #091f0e 100%)' }}
+      style={{ background: 'var(--bg-felt, radial-gradient(ellipse at 50% 40%, #1e293b 0%, #0f172a 70%))' }}
       onClick={() => {
         if (gs.selected !== null) setGs(prev => prev ? ({ ...cloneGs(prev), selected: null, lastMove: null }) : prev);
       }}
@@ -814,31 +852,73 @@ export default function Page() {
 
         {/* ─── Header ──────────────────────────────────── */}
         <div className="flex items-center justify-between mb-2 sm:mb-3">
-          <h1 className="text-amber-100 font-bold tracking-wide"
-            style={{ fontFamily: 'Georgia, serif', fontSize: 'clamp(14px, 3vw, 24px)' }}>
-            La Réussite
-            <span className="font-normal ml-1 sm:ml-2 text-amber-200/50"
-              style={{ fontSize: 'clamp(10px, 2vw, 14px)' }}>
-              Solitaire Tarot
-            </span>
-          </h1>
-          <div className="flex items-center gap-2 sm:gap-3">
-            <span className="text-amber-100/60" style={{ fontSize: 'clamp(10px, 2vw, 14px)' }}>
+          <div>
+            <h1 style={{
+              fontFamily: '-apple-system, sans-serif',
+              fontSize: 'clamp(14px, 3vw, 22px)',
+              fontWeight: 700,
+              color: '#fef3c7',
+              letterSpacing: '-0.3px',
+            }}>
+              La Réussite
+            </h1>
+          </div>
+          <div className="flex items-center gap-2 sm:gap-3" style={{ fontFamily: '-apple-system, sans-serif' }}>
+            {/* Progress pill */}
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: '6px',
+              background: 'rgba(0,0,0,0.3)',
+              borderRadius: '12px',
+              padding: '3px 10px',
+              fontSize: 'clamp(9px, 1.8vw, 12px)',
+              color: '#fbbf24',
+              fontWeight: 600,
+            }}>
+              <div style={{
+                width: 'clamp(30px, 8vw, 50px)', height: '4px',
+                background: 'rgba(255,255,255,0.1)',
+                borderRadius: '2px',
+                overflow: 'hidden',
+              }}>
+                <div style={{
+                  width: `${pct}%`, height: '100%',
+                  background: 'linear-gradient(90deg, #f59e0b, #fbbf24)',
+                  borderRadius: '2px',
+                  transition: 'width 0.3s ease',
+                }} />
+              </div>
               {total}/78
-            </span>
-            <span className="text-amber-100/60" style={{ fontSize: 'clamp(10px, 2vw, 14px)' }}>
-              Coups: {gs.moves}
+            </div>
+            <span style={{
+              fontSize: 'clamp(9px, 1.8vw, 12px)',
+              color: 'rgba(255,255,255,0.4)',
+              fontWeight: 500,
+            }}>
+              {gs.moves} coups
             </span>
             <button onClick={restart}
-              className="bg-amber-800/80 hover:bg-amber-700 text-amber-100 rounded transition-colors"
-              style={{ fontSize: 'clamp(10px, 2vw, 13px)', padding: '4px 10px' }}>
+              style={{
+                fontSize: 'clamp(9px, 1.8vw, 12px)',
+                padding: '4px 10px',
+                background: 'rgba(255,255,255,0.08)',
+                border: '1px solid rgba(255,255,255,0.12)',
+                borderRadius: '8px',
+                color: 'rgba(255,255,255,0.6)',
+                cursor: 'pointer',
+                fontWeight: 500,
+                fontFamily: '-apple-system, sans-serif',
+                transition: 'background 0.15s',
+              }}
+              onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.15)')}
+              onMouseLeave={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.08)')}
+            >
               Nouvelle partie
             </button>
           </div>
         </div>
 
         {/* ─── Top row: Stock + Excuse + Foundations ──── */}
-        <div className="flex items-start gap-1 sm:gap-2 mb-3 sm:mb-4 flex-wrap">
+        <div className="flex items-start mb-2 sm:mb-4 flex-wrap" style={{ gap: 'clamp(2px, 0.8vw, 8px)' }}>
           {/* Stock */}
           <div onClick={(e) => { e.stopPropagation(); distribute(); }}>
             {gs.stock.length > 0 ? (
@@ -846,12 +926,13 @@ export default function Page() {
                 <CardBack onClick={() => {}} />
                 <div className="absolute flex items-center justify-center"
                   style={{
-                    bottom: '-2px', right: '-2px',
+                    bottom: '-3px', right: '-3px',
                     background: '#1e3a5f', color: '#93c5fd',
                     borderRadius: '999px',
                     width: 'calc(var(--card-fs) * 1.3)', height: 'calc(var(--card-fs) * 1.3)',
-                    fontSize: 'calc(var(--card-fs) * 0.7)', fontWeight: 700,
+                    fontSize: 'calc(var(--card-fs) * 0.65)', fontWeight: 700,
                     border: '1px solid #3b82f6',
+                    fontFamily: '-apple-system, sans-serif',
                   }}>
                   {gs.stock.length}
                 </div>
@@ -863,16 +944,19 @@ export default function Page() {
 
           {gs.stock.length > 0 && (
             <button onClick={(e) => { e.stopPropagation(); distribute(); }}
-              className="self-center text-amber-100/70 hover:text-amber-100 transition-colors"
               style={{
-                fontSize: 'clamp(8px, 1.3vw, 12px)', fontFamily: 'Georgia, serif',
-                background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px',
+                alignSelf: 'center',
+                fontSize: 'clamp(8px, 1.3vw, 11px)',
+                fontFamily: '-apple-system, sans-serif',
+                background: 'none', border: 'none', cursor: 'pointer',
+                color: 'rgba(255,255,255,0.4)', padding: '2px 4px',
+                fontWeight: 500,
               }}>
               Distribuer
             </button>
           )}
 
-          {/* Excuse storage slot */}
+          {/* Excuse slot */}
           <div onClick={(e) => { e.stopPropagation(); clickExcuseSlot(); }}>
             {gs.excuseSlot ? (
               <div className="relative cursor-pointer" style={{
@@ -887,18 +971,19 @@ export default function Page() {
               </div>
             ) : (
               <div
-                onClick={() => {}}
                 className="select-none flex flex-col items-center justify-center cursor-pointer"
                 style={{
                   width: 'var(--card-w)', height: 'var(--card-h)',
                   borderRadius: 'var(--card-r)',
-                  border: '2px dashed rgba(134,239,172,0.25)',
-                  color: 'rgba(134,239,172,0.35)',
-                  fontSize: 'calc(var(--card-fs) * 0.7)',
-                  fontFamily: 'Georgia, serif',
+                  border: '2px dashed rgba(251,191,36,0.15)',
+                  color: 'rgba(251,191,36,0.25)',
+                  fontSize: 'calc(var(--card-fs) * 0.6)',
+                  fontFamily: '-apple-system, sans-serif',
+                  fontWeight: 600,
+                  gap: '2px',
                 }}
               >
-                <span style={{ fontSize: 'var(--card-fs)' }}>★</span>
+                <span style={{ fontSize: 'var(--card-fs)', fontWeight: 900 }}>?</span>
                 <span>Excuse</span>
               </div>
             )}
@@ -916,12 +1001,12 @@ export default function Page() {
             </div>
           ))}
 
-          {/* Trump ascending [4]: 1→ */}
+          {/* Trump ascending */}
           <div onClick={(e) => { e.stopPropagation(); clickFoundation(4); }}>
             <FoundationSlot
               fdn={gs.foundations[4]} fi={4} onClick={() => {}}
               landing={lm?.type === 'fdn' && lm.index === 4}
-              dirLabel={gs.trumpsMerged ? '✓' : '↑'}
+              dirLabel={gs.trumpsMerged ? '=' : '↑'}
             />
           </div>
 
@@ -929,24 +1014,26 @@ export default function Page() {
           {showMerge && (
             <button
               onClick={(e) => { e.stopPropagation(); mergeTrumps(); }}
-              className="self-center transition-colors"
               style={{
+                alignSelf: 'center',
                 fontSize: 'clamp(8px, 1.3vw, 11px)',
-                fontFamily: 'Georgia, serif',
-                background: '#065f46',
-                color: '#a7f3d0',
-                border: '1px solid #047857',
-                borderRadius: '6px',
+                fontFamily: '-apple-system, sans-serif',
+                background: 'rgba(251,191,36,0.15)',
+                color: '#fbbf24',
+                border: '1px solid rgba(251,191,36,0.3)',
+                borderRadius: '8px',
                 cursor: 'pointer',
-                padding: '3px 5px',
+                padding: '4px 8px',
+                fontWeight: 600,
                 animation: 'glow-pulse 1.5s ease-in-out infinite',
+                transition: 'background 0.15s',
               }}
             >
               Fusionner
             </button>
           )}
 
-          {/* Trump descending [5]: ←21 */}
+          {/* Trump descending */}
           {!gs.trumpsMerged && (
             <div onClick={(e) => { e.stopPropagation(); clickFoundation(5); }}>
               <FoundationSlot
@@ -997,17 +1084,48 @@ export default function Page() {
 
         {/* ─── Victory ─────────────────────────────────── */}
         {gs.gameOver && (
-          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-            <div className="bg-white rounded-xl p-6 sm:p-8 text-center shadow-2xl mx-4"
-              style={{ fontFamily: 'Georgia, serif', animation: 'card-land 0.5s ease-out' }}>
-              <div className="text-4xl sm:text-5xl mb-3">🎉</div>
-              <h2 className="text-2xl sm:text-3xl font-bold mb-2 text-gray-800">Victoire !</h2>
-              <p className="text-gray-500 mb-5 text-sm sm:text-base">
-                Bravo ! Terminé en {gs.moves} coups.
+          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50"
+            style={{ backdropFilter: 'blur(8px)' }}>
+            <div style={{
+              background: 'linear-gradient(135deg, #1f2937, #111827)',
+              borderRadius: '16px',
+              padding: '32px 40px',
+              textAlign: 'center',
+              boxShadow: '0 25px 50px rgba(0,0,0,0.5), 0 0 100px rgba(251,191,36,0.1)',
+              border: '1px solid rgba(251,191,36,0.2)',
+              fontFamily: '-apple-system, sans-serif',
+              animation: 'card-land 0.5s ease-out',
+              maxWidth: '90vw',
+            }}>
+              <div style={{ fontSize: '48px', marginBottom: '12px' }}>&#127881;</div>
+              <h2 style={{
+                fontSize: '28px', fontWeight: 800, color: '#fbbf24',
+                marginBottom: '8px', letterSpacing: '-0.5px',
+              }}>
+                Victoire !
+              </h2>
+              <p style={{
+                color: 'rgba(255,255,255,0.4)', marginBottom: '24px',
+                fontSize: '14px', fontWeight: 500,
+              }}>
+                Termin&#233; en {gs.moves} coups
               </p>
               <button onClick={restart}
-                className="bg-emerald-700 hover:bg-emerald-600 text-white px-6 py-2 rounded-lg text-lg transition-colors"
-                style={{ fontFamily: 'Georgia, serif' }}>
+                style={{
+                  background: 'linear-gradient(135deg, #f59e0b, #d97706)',
+                  color: '#1f2937',
+                  border: 'none',
+                  borderRadius: '10px',
+                  padding: '10px 28px',
+                  fontSize: '16px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  fontFamily: '-apple-system, sans-serif',
+                  transition: 'transform 0.1s',
+                }}
+                onMouseDown={e => (e.currentTarget.style.transform = 'scale(0.97)')}
+                onMouseUp={e => (e.currentTarget.style.transform = 'scale(1)')}
+              >
                 Rejouer
               </button>
             </div>
