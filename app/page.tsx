@@ -223,6 +223,68 @@ function findFoundation(card: Card, fdns: Card[][], merged: boolean): number {
   return -1;
 }
 
+// Given a column and a foundation index, find how many cards from the bottom
+// of the column's movable sequence can be placed consecutively on the foundation.
+// Returns the cards to move (in order), or empty array if none can be placed.
+function findSequenceForFoundation(
+  col: Card[], fi: number, fdns: Card[][], merged: boolean
+): Card[] {
+  if (col.length === 0) return [];
+  const ss = seqStart(col);
+  const seq = col.slice(ss); // the movable sequence
+
+  // For suit foundations (0-3): only the bottom card (top of column) can go,
+  // because suit foundations build A->K and sequences are descending.
+  // Only a single card at the bottom matches.
+  if (fi < 4) {
+    const bottom = seq[seq.length - 1];
+    if (bottom && canPlaceOnFoundation(bottom, fi, fdns, merged)) return [bottom];
+    return [];
+  }
+
+  // For trump foundations (4-5): find the longest suffix of the sequence
+  // that can be placed on the foundation in order (bottom card first).
+  // The sequence in the column is descending (e.g. 10,9,8,7 with possible excuses).
+  // Foundation 4 (ascending) needs consecutive ascending values.
+  // Foundation 5 (descending) needs consecutive descending values.
+  if (merged) return [];
+  const fdn = fdns[fi];
+
+  // Collect actual trump cards from the sequence (skip excuses, they stay in column)
+  // We need to find cards from bottom of sequence going up that form a consecutive run
+  // matching the foundation's next expected values.
+  const trumpsFromBottom: { card: Card; colIndex: number }[] = [];
+  for (let i = seq.length - 1; i >= 0; i--) {
+    const card = seq[i];
+    if (card.kind === 'excuse') continue; // skip excuses
+    if (card.kind !== 'trump') break; // non-trump breaks
+    trumpsFromBottom.push({ card, colIndex: ss + i });
+  }
+
+  if (trumpsFromBottom.length === 0) return [];
+
+  // Check how many of these consecutive trumps can go on the foundation
+  const result: Card[] = [];
+  // Simulate placing cards one by one
+  let nextExpected: number;
+  if (fi === 4) {
+    nextExpected = fdn.length === 0 ? 1 : fdn[fdn.length - 1].value + 1;
+  } else {
+    nextExpected = fdn.length === 0 ? 21 : fdn[fdn.length - 1].value - 1;
+  }
+
+  for (const { card } of trumpsFromBottom) {
+    if (card.value === nextExpected) {
+      result.push(card);
+      nextExpected = fi === 4 ? nextExpected + 1 : nextExpected - 1;
+    } else {
+      break;
+    }
+  }
+
+  return result;
+}
+
 function canMergeTrumps(gs: GameState): boolean {
   if (gs.trumpsMerged) return false;
   const asc = gs.foundations[4];
@@ -806,21 +868,25 @@ export default function Page() {
         s.selected = null; s.lastMove = null; return s;
       }
 
-      // Try to place selected card on this foundation
-      // From a column: always try the top (last) card only, not the whole sequence
+      // Try to place selected card(s) on this foundation
       if (s.selected?.from === 'col') {
         const col = s.columns[s.selected.index];
-        const topCard = col.length > 0 ? col[col.length - 1] : null;
-        if (!topCard || !canPlaceOnFoundation(topCard, fi, s.foundations, s.trumpsMerged)) {
-          s.selected = null; return s;
+        // For trump foundations: try to move a sequence of trumps
+        const seqCards = findSequenceForFoundation(col, fi, s.foundations, s.trumpsMerged);
+        if (seqCards.length > 0) {
+          // Remove matched cards from column (they are at the bottom of the movable seq)
+          for (const sc of seqCards) {
+            const idx = col.findIndex(c => c.id === sc.id);
+            if (idx >= 0) col.splice(idx, 1);
+          }
+          revealBottom(col);
+          s.foundations[fi].push(...seqCards);
+          s.selected = null; s.moves++;
+          s.lastMove = { type: 'fdn', index: fi };
+          if (isWin(s)) s.gameOver = true;
+          return s;
         }
-        col.pop();
-        revealBottom(col);
-        s.foundations[fi].push(topCard);
-        s.selected = null; s.moves++;
-        s.lastMove = { type: 'fdn', index: fi };
-        if (isWin(s)) s.gameOver = true;
-        return s;
+        s.selected = null; return s;
       }
       // From excuse or foundation
       const card = getSelectedCard(s);
@@ -842,6 +908,23 @@ export default function Page() {
       const s = cloneGs(prev);
       if (s.selected !== null) {
         if (s.selected.from === 'excuse') { s.selected = null; return s; }
+        // If selected from a column, try to extract the excuse from within the sequence
+        if (s.selected.from === 'col' && s.excuseSlot === null) {
+          const col = s.columns[s.selected.index];
+          const ss = seqStart(col);
+          // Find an excuse card in the movable sequence
+          const excIdx = col.findIndex((c, i) => i >= ss && c.kind === 'excuse' && c.faceUp);
+          if (excIdx >= 0) {
+            const excCard = col[excIdx];
+            col.splice(excIdx, 1);
+            revealBottom(col);
+            excCard.faceUp = true;
+            s.excuseSlot = excCard;
+            s.selected = null; s.moves++;
+            s.lastMove = { type: 'excuse' };
+            return s;
+          }
+        }
         const card = getSelectedCard(s);
         if (card && card.kind === 'excuse' && s.excuseSlot === null) {
           removeSelectedCards(s);
@@ -888,6 +971,23 @@ export default function Page() {
         s.lastMove = { type: 'excuse' };
         return s;
       }
+      // Try trump foundations with sequence support first
+      for (const fi of [4, 5]) {
+        const seqCards = findSequenceForFoundation(col, fi, s.foundations, s.trumpsMerged);
+        if (seqCards.length > 0) {
+          for (const sc of seqCards) {
+            const idx = col.findIndex(c => c.id === sc.id);
+            if (idx >= 0) col.splice(idx, 1);
+          }
+          revealBottom(col);
+          s.foundations[fi].push(...seqCards);
+          s.selected = null; s.moves++;
+          s.lastMove = { type: 'fdn', index: fi };
+          if (isWin(s)) s.gameOver = true;
+          return s;
+        }
+      }
+      // Try suit foundations (single card)
       const fi = findFoundation(card, s.foundations, s.trumpsMerged);
       if (fi === -1) return prev;
       col.pop(); revealBottom(col);
@@ -1121,20 +1221,23 @@ export default function Page() {
         if (!prev) return prev;
         const s = cloneGs(prev);
         s.selected = d.from;
-        // From a column: always try the top (last) card only
+        // From a column: try to move a sequence of cards
         if (s.selected?.from === 'col') {
           const col = s.columns[s.selected.index];
-          const topCard = col.length > 0 ? col[col.length - 1] : null;
-          if (!topCard || !canPlaceOnFoundation(topCard, fi, s.foundations, s.trumpsMerged)) {
-            s.selected = null; return s;
+          const seqCards = findSequenceForFoundation(col, fi, s.foundations, s.trumpsMerged);
+          if (seqCards.length > 0) {
+            for (const sc of seqCards) {
+              const idx = col.findIndex(c => c.id === sc.id);
+              if (idx >= 0) col.splice(idx, 1);
+            }
+            revealBottom(col);
+            s.foundations[fi].push(...seqCards);
+            s.selected = null; s.moves++;
+            s.lastMove = { type: 'fdn', index: fi };
+            if (isWin(s)) s.gameOver = true;
+            return s;
           }
-          col.pop();
-          revealBottom(col);
-          s.foundations[fi].push(topCard);
-          s.selected = null; s.moves++;
-          s.lastMove = { type: 'fdn', index: fi };
-          if (isWin(s)) s.gameOver = true;
-          return s;
+          s.selected = null; return s;
         }
         const card = getSelectedCard(s);
         if (!card || !canPlaceOnFoundation(card, fi, s.foundations, s.trumpsMerged)) {
@@ -1153,6 +1256,22 @@ export default function Page() {
         if (!prev) return prev;
         const s = cloneGs(prev);
         s.selected = d.from;
+        // If dragging from a column, try to extract excuse from the sequence
+        if (s.selected?.from === 'col' && s.excuseSlot === null) {
+          const col = s.columns[s.selected.index];
+          const ss = seqStart(col);
+          const excIdx = col.findIndex((c, i) => i >= ss && c.kind === 'excuse' && c.faceUp);
+          if (excIdx >= 0) {
+            const excCard = col[excIdx];
+            col.splice(excIdx, 1);
+            revealBottom(col);
+            excCard.faceUp = true;
+            s.excuseSlot = excCard;
+            s.selected = null; s.moves++;
+            s.lastMove = { type: 'excuse' };
+            return s;
+          }
+        }
         const card = getSelectedCard(s);
         if (card && card.kind === 'excuse' && s.excuseSlot === null) {
           removeSelectedCards(s);
